@@ -190,7 +190,7 @@ class WooCommerceService:
             url = f"{self.url}/wp-json/wc/v3/products/categories"
             params = {'per_page': 100}  # Загружаем до 100 категорий
             
-            response = requests.get(url, auth=self.auth, params=params, verify=False, timeout=30)
+            response = requests.get(url, auth=self.auth, params=params, verify=False, timeout=60)
             
             if response.status_code == 200:
                 categories = response.json()
@@ -238,7 +238,7 @@ class WooCommerceService:
         try:
             url = f"{self.url}/wp-json/wc/v3/products/attributes"
             
-            response = requests.get(url, auth=self.auth, verify=False, timeout=30)
+            response = requests.get(url, auth=self.auth, verify=False, timeout=60)
             
             if response.status_code == 200:
                 attributes = response.json()
@@ -314,7 +314,7 @@ class WooCommerceService:
                 'has_archives': False
             }
             
-            response = requests.post(url, auth=self.auth, json=data, verify=False, timeout=30)
+            response = requests.post(url, auth=self.auth, json=data, verify=False, timeout=60)
             
             if response.status_code == 201:
                 result = response.json()
@@ -355,7 +355,7 @@ class WooCommerceService:
             url = f"{self.url}/wp-json/wc/v3/products/attributes/{attribute_id}/terms"
             
             # Проверяем существует ли такой термин
-            check_response = requests.get(url, auth=self.auth, params={'search': term_name}, verify=False, timeout=30)
+            check_response = requests.get(url, auth=self.auth, params={'search': term_name}, verify=False, timeout=60)
             if check_response.status_code == 200:
                 existing = check_response.json()
                 for term in existing:
@@ -375,7 +375,7 @@ class WooCommerceService:
                 'name': term_name
             }
             
-            response = requests.post(url, auth=self.auth, json=data, verify=False, timeout=30)
+            response = requests.post(url, auth=self.auth, json=data, verify=False, timeout=60)
             
             if response.status_code == 201:
                 result_data = response.json()
@@ -390,7 +390,7 @@ class WooCommerceService:
                 return result
             elif response.status_code == 400:
                 # Возможно термин уже существует, ищем его
-                check_response = requests.get(url, auth=self.auth, verify=False, timeout=30)
+                check_response = requests.get(url, auth=self.auth, verify=False, timeout=60)
                 if check_response.status_code == 200:
                     all_terms = check_response.json()
                     for term in all_terms:
@@ -467,7 +467,18 @@ class WooCommerceService:
                     'type': 'variable'  # Только вариативные товары
                 }
                 
-                response = requests.get(url, auth=self.auth, params=params, verify=False, timeout=30)
+                # Retry механизм для устойчивости
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        response = requests.get(url, auth=self.auth, params=params, verify=False, timeout=60)
+                        break  # Успешный запрос
+                    except (requests.Timeout, requests.ConnectionError) as e:
+                        if attempt < max_retries - 1:
+                            logger.warning(f"Таймаут при загрузке страницы {page}, попытка {attempt + 1}/{max_retries}")
+                            time.sleep(2)  # Пауза перед повтором
+                        else:
+                            raise  # Последняя попытка — пробрасываем ошибку
                 
                 if response.status_code == 200:
                     products = response.json()
@@ -475,7 +486,6 @@ class WooCommerceService:
                         break
                     
                     all_products.extend(products)
-                    # Убрано DEBUG: загружена страница
                     
                     # Проверяем есть ли еще страницы
                     total_pages = int(response.headers.get('X-WP-TotalPages', 1))
@@ -508,7 +518,7 @@ class WooCommerceService:
             url = f"{self.url}/wp-json/wc/v3/products/{product_id}/variations"
             params = {'per_page': 100}
             
-            response = requests.get(url, auth=self.auth, params=params, verify=False, timeout=30)
+            response = requests.get(url, auth=self.auth, params=params, verify=False, timeout=60)
             
             if response.status_code == 200:
                 variations = response.json()
@@ -536,7 +546,7 @@ class WooCommerceService:
             url = f"{self.url}/wp-json/wc/v3/products"
             params = {'sku': sku}
             
-            response = requests.get(url, auth=self.auth, params=params, verify=False, timeout=30)
+            response = requests.get(url, auth=self.auth, params=params, verify=False, timeout=60)
             response.raise_for_status()
             
             products = response.json()
@@ -1126,7 +1136,7 @@ class WooCommerceService:
         try:
             # Получаем существующие вариации
             url = f"{self.url}/wp-json/wc/v3/products/{product_id}/variations"
-            response = requests.get(url, auth=self.auth, verify=False, timeout=30)
+            response = requests.get(url, auth=self.auth, verify=False, timeout=60)
             response.raise_for_status()
             
             existing_variations = response.json()
@@ -1171,7 +1181,7 @@ class WooCommerceService:
                             auth=self.auth,
                             json=update_data,
                             verify=False,
-                            timeout=30
+                            timeout=60
                         )
                         update_response.raise_for_status()
                         
@@ -1226,7 +1236,7 @@ class WooCommerceService:
                 auth=self.auth,
                 params=params,
                 verify=False,
-                timeout=30
+                timeout=60
             )
             response.raise_for_status()
             wc_variations = response.json()
@@ -1261,7 +1271,7 @@ class WooCommerceService:
                     auth=self.auth,
                     json=update_data,
                     verify=False,
-                    timeout=30
+                    timeout=60
                 )
                 update_response.raise_for_status()
                 
