@@ -462,9 +462,9 @@ class OpenAIService:
             logger.error("❌ [OpenAI] OPENAI_API_KEY не найден в .env файле!")
             self.enabled = False
         else:
-            logger.info(f"✅ [OpenAI] API ключ загружен: {self.api_key[:20]}...{self.api_key[-4:]}")
-            logger.info(f"📊 [OpenAI] Длина ключа: {len(self.api_key)} символов")
-            logger.info(f"🚀 [OpenAI] Модель: gpt-5.1 (новейшая флагманская модель)")
+            masked_key = f"{self.api_key[:7]}...{self.api_key[-4:]}"
+            logger.info(f"✅ [OpenAI] API ключ загружен: {masked_key}")
+            logger.info(f"🚀 [OpenAI] Модель: gpt-4o (новейшая флагманская модель)")
             self.enabled = True
             
         logger.info(f"🔌 [OpenAI] Статус сервиса: {'ВКЛЮЧЕН ✅' if self.enabled else 'ВЫКЛЮЧЕН ❌'}")
@@ -693,14 +693,13 @@ SEO-заголовок ≤ 60 зн., ОБЯЗАТЕЛЬНО включает Т�
             import openai
             
             logger.info(f"[OpenAI] Создаем клиент OpenAI...")
-            logger.debug(f"[OpenAI] API Key: {self.api_key[:20]}...")
             
             logger.info("="*80)
             logger.info(f"[OpenAI] 🔧 Создаем клиент OpenAI...")
             client = openai.OpenAI(api_key=self.api_key)
             logger.info(f"[OpenAI] ✅ Клиент создан: {type(client).__name__}")
             
-            logger.info(f"[OpenAI] 📤 Отправляем запрос к модели gpt-5.1...")
+            logger.info(f"[OpenAI] 📤 Отправляем запрос к модели gpt-4o...")
             logger.info(f"[OpenAI] 📊 Бренд: {brand}, Категория: {category}")
             logger.info(f"[OpenAI] 📝 Длина промпта: {len(prompt)} символов")
             logger.info(f"[OpenAI] ⚙️  Параметры: temperature=0.7, max_tokens=1500")
