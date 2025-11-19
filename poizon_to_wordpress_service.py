@@ -182,7 +182,6 @@ class WooCommerceService:
         self._load_categories()
         self._load_attributes()
         
-        # Убрано: логи инициализации (дублируются в режиме DEBUG)
     
     def _load_categories(self):
         """Загружает все категории из WordPress"""
@@ -210,7 +209,6 @@ class WooCommerceService:
                     # Также кешируем по имени последней категории
                     self.category_cache[cat['name']] = cat_id
                 
-                # Убрано: логи инициализации (дублируются в режиме DEBUG)
             else:
                 logger.warning(f"Не удалось загрузить категории: {response.status_code}")
                 
@@ -253,7 +251,6 @@ class WooCommerceService:
                         'slug': attr_slug
                     }
                 
-                # Убрано: логи инициализации (дублируются в режиме DEBUG)
             else:
                 logger.warning(f"Не удалось загрузить атрибуты: {response.status_code}")
                 
@@ -599,40 +596,45 @@ class WooCommerceService:
             else:
                 categories_data = [{'id': category_id}]  # Используем ID категории!
             
-            # Формируем теги только из бренда и модели (без лишнего мусора)
+            # Формируем теги - используем готовые из GPT-5 Nano или fallback
             tags = []
-            keywords = getattr(product, 'keywords', '')
             
-            # Добавляем только бренд
-            if product.brand:
-                tags.append({'name': product.brand.strip()})
-            
-            # Извлекаем название модели из первых 2-3 ключевых слов (пропускаем бренд и описательные слова)
-            if keywords:
-                # Разбиваем ключевые слова
-                kw_list = [kw.strip() for kw in keywords.split(';') if kw.strip()]
+            # Проверяем есть ли готовые теги от GPT-5 Nano
+            if hasattr(product, 'tags') and product.tags:
+                # Используем теги от GPT-5 Nano (уже очищенные от мусора)
+                for tag_name in product.tags:
+                    tags.append({'name': tag_name.strip()})
+                logger.info(f"✅ Используем теги от GPT-5 Nano: {', '.join(product.tags)}")
+            else:
+                # Fallback: старая логика если GPT-5 Nano не сгенерировал теги
+                keywords = getattr(product, 'keywords', '')
                 
-                # Ищем модель: пропускаем бренд и берём только короткие названия (не описательные)
-                for kw in kw_list[:5]:  # Проверяем первые 5 ключевых слов
-                    # Пропускаем бренд (уже добавлен)
-                    if product.brand and kw.lower() == product.brand.lower():
-                        continue
+                # Добавляем только бренд
+                if product.brand:
+                    tags.append({'name': product.brand.strip()})
+                
+                # Извлекаем название модели из первых 2-3 ключевых слов
+                if keywords:
+                    kw_list = [kw.strip() for kw in keywords.split(';') if kw.strip()]
                     
-                    # Пропускаем длинные описательные фразы (кроссовки, обувь, беговые и т.д.)
-                    if len(kw.split()) > 3:  # Более 3 слов = описание
-                        continue
-                    
-                    # Пропускаем очевидные описательные термины
-                    descriptive_terms = ['кроссовки', 'обувь', 'ботинки', 'сандалии', 'сланцы', 
-                                       'женская', 'мужская', 'детская', 'унисекс',
-                                       'белый', 'черный', 'красный', 'синий', 'зеленый', 'желтый',
-                                       'спортивная', 'повседневная', 'беговая', 'баскетбольная']
-                    if any(term in kw.lower() for term in descriptive_terms):
-                        continue
-                    
-                    # Если дошли сюда - это скорее всего название модели
-                    tags.append({'name': kw})
-                    break  # Берём только первую подходящую модель
+                    for kw in kw_list[:5]:
+                        if product.brand and kw.lower() == product.brand.lower():
+                            continue
+                        
+                        if len(kw.split()) > 3:
+                            continue
+                        
+                        descriptive_terms = ['кроссовки', 'обувь', 'ботинки', 'сандалии', 'сланцы', 
+                                           'женская', 'мужская', 'детская', 'унисекс',
+                                           'белый', 'черный', 'красный', 'синий', 'зеленый', 'желтый',
+                                           'спортивная', 'повседневная', 'беговая', 'баскетбольная']
+                        if any(term in kw.lower() for term in descriptive_terms):
+                            continue
+                        
+                        tags.append({'name': kw})
+                        break
+                
+                logger.info(f"⚠️  Используем fallback теги: {', '.join([t['name'] for t in tags])}")
             
             # Используем SEO title если есть, иначе обычный title
             product_name = getattr(product, 'seo_title', product.title) or product.title
@@ -700,14 +702,18 @@ class WooCommerceService:
             
             logger.info(f"ФИНАЛЬНОЕ название для WordPress: {product_name}")
             
-            # Формируем meta_data
+            # Формируем meta_data с использованием полей от GPT-5 Nano
             meta_data = [
                 {'key': '_poizon_spu_id', 'value': str(product.spu_id)},  # ВАЖНО: сохраняем spuId!
             ]
+            
+            # Meta description от GPT-5 Nano
             if hasattr(product, 'meta_description') and product.meta_description:
                 meta_data.append({'key': '_yoast_wpseo_metadesc', 'value': product.meta_description})
-            if keywords:
-                meta_data.append({'key': '_yoast_wpseo_focuskw', 'value': keywords})
+            
+            # Focus keyword от GPT-5 Nano
+            if hasattr(product, 'keywords') and product.keywords:
+                meta_data.append({'key': '_yoast_wpseo_focuskw', 'value': product.keywords})
             
             # Загружаем изображения с изменением размера до 600x600
             logger.info(f"  Загрузка изображений для товара...")

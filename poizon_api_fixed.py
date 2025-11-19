@@ -26,6 +26,8 @@ from typing import Dict, List, Optional
 from dotenv import load_dotenv
 import urllib3
 import time
+import openai
+import re
 
 # Отключаем SSL предупреждения для работы с API
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -64,6 +66,9 @@ class PoisonAPIClientFixed:
         self.client_id = os.getenv('POIZON_CLIENT_ID')
         self.base_url = "https://poizon-api.com/api/dewu"
         
+        # OpenAI API для генерации описаний
+        self.openai_api_key = os.getenv('OPENAI_API_KEY')
+        
         if not self.api_key or not self.client_id:
             raise ValueError("POIZON_API_KEY и POIZON_CLIENT_ID должны быть в .env")
         
@@ -81,6 +86,11 @@ class PoisonAPIClientFixed:
         logger.info("🔌 [Poizon API] Клиент инициализирован")
         logger.info(f"⏱️  [Poizon API] Retry настройки: {self.max_retries} попыток, базовая задержка {self.base_delay}с")
         logger.info(f"🛡️  [Poizon API] Защита от rate limit: {self.request_delay}с между запросами")
+        
+        if self.openai_api_key:
+            logger.info(f"🤖 [OpenAI] API key загружен: {self.openai_api_key[:7]}...{self.openai_api_key[-4:]}")
+        else:
+            logger.warning("⚠️  [OpenAI] API key не найден - SEO-контент не будет генерироваться")
     
     def _make_request_with_retry(self, method: str, url: str, **kwargs) -> Optional[requests.Response]:
         """Выполняет запрос с retry механизмом при ошибках 429/503"""
@@ -291,6 +301,136 @@ class PoisonAPIClientFixed:
         except Exception as e:
             logger.error(f"[ERROR] Ошибка получения цен {spu_id}: {e}")
             return {}
+    
+    def generate_seo_content(self, brand: str, product_type: str, product_name: str, sku: str, color: str = "", material: str = "") -> Optional[Dict]:
+        """
+        Генерирует SEO-контент через GPT-4o-mini.
+        
+        Args:
+            brand: Название бренда
+            product_type: Тип товара (Кроссовки, Куртка и т.д.)
+            product_name: Название модели
+            sku: Артикул
+            color: Цвет (опционально)
+            material: Материал (опционально)
+            
+        Returns:
+            Словарь с полями: seo_title, short_description, description, meta_description, keywords, tags
+            или None при ошибке
+        """
+        if not self.openai_api_key:
+            logger.warning("⚠️  OpenAI API key не настроен - пропускаем генерацию SEO")
+            return None
+        
+        try:
+            # Формируем промпт точно как в успешном скрипте fix_product_descriptions.py
+            prompt = f"""Создай SEO-контент для товара.
+
+ДАННЫЕ:
+- Бренд: {brand}
+- Товар: {product_type} {brand} {product_name}
+- Артикул: {sku}
+- Цвет: {color}
+- Материал: {material}
+
+ФОРМАТ ОТВЕТА (6 строк):
+1. {product_type} {brand} {product_name}
+2. Краткое описание (280-320 символов)
+3. Полное описание (минимум 800 символов), начни: "{brand} {product_name} {sku} –"
+4. SEO Title (до 60 символов)
+5. Meta Description (150-160 символов), заканчивается "Закажи онлайн!"
+6. Теги: {brand}; модель"""
+            
+            logger.info(f"🤖 [GPT-4o-mini] Генерация SEO для: {brand} {product_name}")
+            
+            client = openai.OpenAI(api_key=self.openai_api_key)
+            
+            # Используем GPT-4o-mini
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "Ты SEO-копирайтер"},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            logger.info(f"✅ [GPT-4o-mini] Ответ получен, токенов: {response.usage.total_tokens}")
+            
+            # Парсим ответ
+            lines = result_text.split('\n')
+            parsed_lines = []
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                # Убираем нумерацию
+                if line and len(line) > 3:
+                    if line[0].isdigit() and line[1:3] in ['. ', ') ', ': ']:
+                        line = line[3:].strip()
+                    elif line[:2].isdigit() and line[2:4] in ['. ', ') ', ': ']:
+                        line = line[4:].strip()
+                
+                if line:
+                    parsed_lines.append(line)
+            
+            if len(parsed_lines) < 6:
+                logger.error(f"❌ Недостаточно строк в ответе: {len(parsed_lines)}")
+                return None
+            
+            # Очистка от китайских символов (функция из fix_product_descriptions.py)
+            def clean_chinese(text: str) -> str:
+                result = []
+                for char in text:
+                    code = ord(char)
+                    if ((0x0041 <= code <= 0x005A) or  # A-Z
+                        (0x0061 <= code <= 0x007A) or  # a-z
+                        (0x0030 <= code <= 0x0039) or  # 0-9
+                        (0x0410 <= code <= 0x044F) or  # А-я
+                        code in [0x0020, 0x002D, 0x0027, 0x002E, 0x002C, 0x002F, 0x003A, 0x003B, 0x0028, 0x0029, 0x0021, 0x003F]):
+                        result.append(char)
+                return ''.join(result).strip()
+            
+            # Извлекаем поля
+            title_ru = clean_chinese(parsed_lines[0])
+            short_desc = parsed_lines[1]
+            full_desc = parsed_lines[2]
+            seo_title = clean_chinese(parsed_lines[3])
+            meta_desc = parsed_lines[4]
+            keywords = parsed_lines[5]
+            
+            # Извлекаем теги - только бренд и модель
+            tags_list = [k.strip() for k in keywords.split(';')]
+            filtered_tags = []
+            for tag in tags_list:
+                tag_lower = tag.lower()
+                if tag_lower not in ['кроссовки', 'обувь', 'одежда', 'товар', 'sneakers', 'shoes']:
+                    filtered_tags.append(tag)
+            
+            # Добавляем бренд если его нет
+            if brand not in filtered_tags:
+                filtered_tags.insert(0, brand)
+            
+            # Фокусное ключевое слово для Yoast SEO
+            focus_keyword = brand
+            
+            logger.info(f"✅ [GPT-4o-mini] SEO контент сгенерирован:")
+            logger.info(f"   Название: {title_ru[:60]}...")
+            logger.info(f"   Теги: {', '.join(filtered_tags)}")
+            
+            return {
+                'seo_title': title_ru,  # Используем Line 1 (Тип Бренд Модель) как основное название
+                'short_description': short_desc,
+                'description': full_desc,
+                'meta_description': meta_desc,
+                'keywords': focus_keyword,
+                'tags': filtered_tags
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ [GPT-4o-mini] Ошибка генерации SEO: {e}")
+            return None
     
     def get_product_full_info(self, spu_id: int):
         """
@@ -699,6 +839,61 @@ class PoisonAPIClientFixed:
             logger.info(f"Категория Poizon: '{poizon_category}'")
             logger.info(f"Категория WordPress: '{wordpress_category}'")
             
+            # === ШАГ 5: Генерация SEO-контента через GPT-4o-mini ===
+            # Определяем тип товара из WordPress категории
+            product_type = "Товар"
+            category_lower = wordpress_category.lower()
+            
+            if 'кроссовки' in category_lower or 'sneakers' in category_lower:
+                product_type = "Кроссовки"
+            elif 'куртка' in category_lower or 'jacket' in category_lower:
+                product_type = "Куртка"
+            elif 'футболка' in category_lower or 't-shirt' in category_lower:
+                product_type = "Футболка"
+            elif 'толстовка' in category_lower or 'hoodie' in category_lower:
+                product_type = "Толстовка"
+            elif 'брюки' in category_lower or 'pants' in category_lower:
+                product_type = "Брюки"
+            elif 'шорты' in category_lower or 'shorts' in category_lower:
+                product_type = "Шорты"
+            
+            # Извлекаем цвет и материал из атрибутов
+            color = attributes.get('Цвет', attributes.get('Color', ''))
+            material = attributes.get('Материал', attributes.get('Material', ''))
+            
+            # Извлекаем название модели из title (убираем бренд и китайские символы)
+            product_title = detail.get('title', '')
+            product_name = product_title.replace(brand_name, '').strip()
+            product_name = re.sub(r'【[^】]+】', '', product_name).strip()  # Убираем китайские скобки
+            
+            # Генерируем SEO-контент
+            seo_content = self.generate_seo_content(
+                brand=brand_name,
+                product_type=product_type,
+                product_name=product_name,
+                sku=detail.get('articleNumber', ''),
+                color=color,
+                material=material
+            )
+            
+            # Используем сгенерированный контент или fallback на базовый
+            if seo_content:
+                seo_title = seo_content['seo_title']
+                short_description = seo_content['short_description']
+                full_description = seo_content['description']
+                meta_description = seo_content['meta_description']
+                keywords = seo_content['keywords']
+                tags = seo_content['tags']
+            else:
+                # Fallback: базовый контент если GPT-4o-mini не сработал
+                seo_title = f"{product_type} {brand_name} {product_name}"
+                short_description = f"{product_type} {brand_name} {product_name}. Артикул: {detail.get('articleNumber', '')}"
+                full_description = detail.get('desc', '')
+                meta_description = f"{product_type} {brand_name} {product_name}. Закажи онлайн!"
+                keywords = brand_name
+                tags = [brand_name]
+                logger.warning(f"⚠️  Используется fallback контент (GPT-4o-mini недоступен)")
+            
             # Создаем объект товара (простой dict вместо dataclass)
             from types import SimpleNamespace
             
@@ -715,7 +910,13 @@ class PoisonAPIClientFixed:
                 images=images,
                 variations=variations,
                 attributes=attributes,
-                description=detail.get('desc', '')
+                description=full_description,
+                # Новые SEO-поля
+                seo_title=seo_title,
+                short_description=short_description,
+                meta_description=meta_description,
+                keywords=keywords,
+                tags=tags
             )
             
             logger.info(f"[OK] Загружена полная информация о товаре {spu_id}")

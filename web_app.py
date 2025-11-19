@@ -6,7 +6,7 @@
 - Просмотра товаров с изображениями и ценами
 - Выбора товаров для загрузки в WordPress
 - Настройки курса валюты и наценки
-- Автоматической генерации SEO-оптимизированных описаний через GigaChat
+- Автоматической генерации SEO-оптимизированных описаний через GPT-5 Nano
 - Загрузки товаров в WooCommerce с вариациями (размеры, цвета)
 
 Технологии:
@@ -14,12 +14,16 @@
     - Server-Sent Events (SSE): потоковая передача прогресса загрузки
     - In-memory кэш: минимизация запросов к API
     - Файловый кэш: долговременное хранение брендов (обновление раз в месяц)
-    - GigaChat API: генерация описаний товаров
+    - GPT-5 Nano: генерация описаний товаров через poizon_api_fixed.py
 
 Архитектура:
     /api/search - поиск товаров в Poizon
     /api/upload-stream - загрузка товаров с потоковым прогрессом
-    /api/gigachat-generate - генерация описаний через AI
+    
+    SEO генерация:
+    - Интегрирована в poizon_api_fixed.py::generate_seo_content()
+    - Вызывается автоматически в get_product_full_info()
+    - Единая точка входа для всех модулей проекта
     
 Безопасность:
     - Работает только локально (127.0.0.1)
@@ -417,7 +421,6 @@ def filter_products_by_category(products: List[Dict], category_id: int) -> List[
 # Глобальные клиенты
 poizon_client = None
 woocommerce_client = None
-openai_client = None
 
 # Очередь для прогресс-событий (SSE)
 progress_queues = {}  # {session_id: queue.Queue()}
@@ -448,465 +451,18 @@ class ProcessingStatus:
     timestamp: str
 
 
-class OpenAIService:
-    """Клиент для работы с OpenAI API"""
-    
-    def __init__(self):
-        """Инициализация клиента OpenAI"""
-        logger.info("="*80)
-        logger.info("🤖 [OpenAI] Инициализация OpenAI сервиса...")
-        
-        self.api_key = os.getenv('OPENAI_API_KEY')
-        
-        if not self.api_key:
-            logger.error("❌ [OpenAI] OPENAI_API_KEY не найден в .env файле!")
-            self.enabled = False
-        else:
-            masked_key = f"{self.api_key[:7]}...{self.api_key[-4:]}"
-            logger.info(f"✅ [OpenAI] API ключ загружен: {masked_key}")
-            logger.info(f"🚀 [OpenAI] Модель: gpt-4o (новейшая флагманская модель)")
-            self.enabled = True
-            
-        logger.info(f"🔌 [OpenAI] Статус сервиса: {'ВКЛЮЧЕН ✅' if self.enabled else 'ВЫКЛЮЧЕН ❌'}")
-        logger.info("="*80)
-    
-    def translate_color(self, color_chinese: str) -> str:
-        """
-        Переводит название цвета с китайского на русский через OpenAI.
-        
-        Args:
-            color_chinese: Название цвета на китайском (например "黑白灰")
-            
-        Returns:
-            Переведенное название цвета на русском
-        """
-        if not self.enabled or not color_chinese:
-            return color_chinese
-        
-        # Быстрая проверка - если уже латиница/кириллица, не переводим
-        if all(ord(c) < 0x4E00 for c in color_chinese.replace(' ', '')):
-            return color_chinese
-        
-        try:
-            import openai
-            
-            logger.info(f"[OpenAI] Начинаем перевод цвета: '{color_chinese}'")
-            
-            prompt = f"""Переведи название цвета с китайского на русский.
-
-ЦВЕТ: {color_chinese}
-
-ИНСТРУКЦИЯ:
-- Если это один цвет (例如: "черный" → "Черный", "白色" → "Белый")
-- Если это комбинация цветов (例如: "黑白" → "Черно-белый", "黑白灰" → "Черно-бело-серый")
-- Отвечай ОДНИМ словом или словосочетанием через дефис
-- Без пояснений, только перевод цвета
-- Первая буква заглавная
-
-ОТВЕТ (только название цвета):"""
-            
-            logger.info(f"[OpenAI] 🔧 Создаем клиент OpenAI...")
-            client = openai.OpenAI(api_key=self.api_key)
-            logger.info(f"[OpenAI] ✅ Клиент создан: {type(client).__name__}")
-            
-            logger.info(f"[OpenAI] 📤 Отправляем запрос к модели gpt-5.1...")
-            logger.debug(f"[OpenAI] 📝 Prompt длина: {len(prompt)} символов")
-            logger.debug(f"[OpenAI] 🎨 Переводим цвет: '{color_chinese}'")
-            
-            response = client.chat.completions.create(
-                model="gpt-5.1",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=50
-            )
-            
-            logger.info(f"[OpenAI] 📥 Получен ответ от API")
-            logger.info(f"[OpenAI] 🆔 Response ID: {response.id}")
-            logger.info(f"[OpenAI] 🤖 Использована модель: {response.model}")
-            logger.info(f"[OpenAI] 💰 Токены: prompt={response.usage.prompt_tokens}, completion={response.usage.completion_tokens}, total={response.usage.total_tokens}")
-            
-            translated = response.choices[0].message.content.strip()
-            
-            # Очищаем от лишних символов
-            translated = translated.strip('"\'.,;!? \n\r\t')
-            
-            logger.info(f"[OpenAI] ✅ Перевод цвета: '{color_chinese}' → '{translated}'")
-            return translated
-            
-        except Exception as e:
-            logger.error(f"[OpenAI] ❌ Ошибка перевода цвета: {type(e).__name__}: {e}")
-            import traceback
-            logger.debug(f"[OpenAI] Traceback:\n{traceback.format_exc()}")
-            return color_chinese
-
-    def translate_and_generate_seo(
-        self,
-        title: str,
-        description: str,
-        category: str,
-        brand: str,
-        attributes: Dict[str, str] = None,
-        article_number: str = ''
-    ) -> Dict[str, str]:
-        """
-        Переводит название, создает SEO описание через GigaChat.
-        
-        Args:
-            title: Оригинальное название товара
-            description: Оригинальное описание
-            category: Категория товара
-            brand: Бренд
-            
-        Returns:
-            Словарь с переведенными и сгенерированными данными
-        """
-        # Если GigaChat не настроен, используем базовую обработку
-        if not self.enabled:
-            logger.warning("GigaChat не настроен, используется базовая обработка")
-            return {
-                "title_ru": title,
-                "seo_title": f"{brand} {title[:50]}",
-                "short_description": f"Качественный товар {brand} из категории {category}",
-                "full_description": f"Описание товара {title}. {description[:200] if description else 'Подробное описание будет добавлено позже.'}",
-                "meta_description": f"{brand} - {title[:80]}"
-            }
-        
-        try:
-            # Если атрибуты не переданы, используем пустой словарь
-            if attributes is None:
-                attributes = {}
-            
-            # Извлекаем данные из атрибутов
-            color = attributes.get('Цвет', attributes.get('Основной цвет', ''))
-            material = attributes.get('Материал', attributes.get('Материал верхней части', ''))
-            
-            # Определяем тип товара из категории
-            cat_lower = category.lower()
-            if '运动鞋' in title or '跑步鞋' in title or 'кроссовк' in cat_lower or 'туфля' in cat_lower:
-                product_type = 'спортивная обувь'
-            elif '板鞋' in title:
-                product_type = 'кеды'
-            else:
-                product_type = 'обувь'
-            
-            # Извлекаем название модели из title
-            product_name = title.split()[2:4] if len(title.split()) > 3 else title.split()[:2]
-            product_name = ' '.join(str(x) for x in product_name if x)
-            
-            # Формируем промпт ТОЧНО как в main.py
-            prompt = f"""⚠️ КРИТИЧЕСКИ ВАЖНО: 
-1. СНАЧАЛА переведи ВСЕ китайские/японские слова на АНГЛИЙСКИЙ
-2. ЗАТЕМ составь торговое название ТОЛЬКО из латиницы (A-Z) и цифр всегда с заглавной буквы
-3. НЕ копируй иероглифы - ПЕРЕВОДИ их!
-
-Ты — профессиональный SEO-копирайтер интернет-магазина, специализирующийся на бренде {brand}.
-Создай структурированный SEO-контент для товара.
-
-ИСХОДНЫЕ ДАННЫЕ (могут содержать китайский текст - ПЕРЕВЕДИ ЕГО):
-- Бренд: {brand}
-- Тип товара: {product_type}
-- Исходное название: {title}  // ПЕРЕВЕДИ китайские слова на английский!
-- Артикул/Style ID: {article_number}
-- Цвет: {color}
-- Материал: {material}
-- Исходная категория: {category}
-- Атрибуты: {attributes}
-
-КЛЮЧЕВАЯ ФРАЗА: {brand} {product_name} {color} {article_number}
-ВАЖНО: эта ключевая фраза должна присутствовать В ПЕРВОМ АБЗАЦЕ полного описания!
-
-ИНСТРУКЦИЯ ПО ПЕРЕВОДУ:
-- "定制球鞋" → "Custom Sneakers" (или просто убери)
-- "阿卡丽" → транслитерация "Akali" или убери если непонятно
-- "男款" → "Men's" или "Мужские"
-- "黑白" → "Black White" или "Черно-белые"
-- Если не можешь перевести - УБЕРИ это слово, НЕ копируй иероглифы!
-
-ДОПОЛНИТЕЛЬНЫЕ ПРАВИЛА:
-✓ Никогда не придумывай характеристики, которых нет в данных.
-✓ Названия моделей, линейки (Air Jordan 1, Dunk Low, Yeezy 350 V2, Samba OG и т.д.) пиши латиницей всегда с заглавной буквы и не переводи.
-✓ Не упоминай другие бренды.
-✓ Пиши живым, разговорным языком: избегай канцелярита «высококачественный, многофункциональный, превосходный».
-✓ Используй конкретику: вместо «удобные» – «мягкий воротник не натирает ахилл», вместо «лёгкие» – «вес одной кроссовки 320 г (42 размер)».
-✓ Объём: краткое описание 280-320 зн., ПОЛНОЕ ОПИСАНИЕ МИНИМУМ 800 СИМВОЛОВ (не менее 300 слов!).
-
-ПРАВИЛА ЧИТАЕМОСТИ (КРИТИЧЕСКИ ВАЖНО!):
-⚠️ АКТИВНЫЙ ГОЛОС: Используй ТОЛЬКО активный голос! Максимум 10% пассивного голоса.
-   ❌ Плохо: "Модель была выпущена в 2021 году", "Кроссовки были созданы для бега"
-   ✅ Хорошо: "Бренд выпустил модель в 2021 году", "Дизайнеры создали кроссовки для бега"
-   ✅ Хорошо: "Кроссовки держат асфальт", "Подошва амортизирует удары", "Материал дышит"
-
-⚠️ КОРОТКИЕ ПРЕДЛОЖЕНИЯ: Максимум 25% предложений длиннее 15 слов!
-   ❌ Плохо: Длинное предложение с множеством придаточных, запятых и деепричастных оборотов, которое трудно читать и понимать.
-   ✅ Хорошо: Пиши короткими фразами. Одна мысль – одно предложение. Максимум 12-15 слов.
-   ✅ Примеры коротких предложений: "Верх из кожи." "Подошва держит асфальт." "Вес 320 грамм."
-
-В ПОЛНОМ ОПИСАНИИ обязательно раскрой (КОРОТКИМИ ПРЕДЛОЖЕНИЯМИ!):
-→ ПЕРВЫЙ АБЗАЦ: начни с ключевой фразы "{brand} {product_name} {color} {article_number}". Кратко опиши товар;
-→ визуальный образ (цвет, фактуры, контрасты);
-→ материалы и их тактильные ощущения;
-→ технологии (если указаны в attributes: Air, Boost, GORE-TEX и т.д.);
-→ с чем носить. Куда надевать;
-→ выгода для покупателя (лёгкость, устойчивость к погоде, доп. шнурки и т.д.).
-
-SEO-заголовок ≤ 60 зн., ОБЯЗАТЕЛЬНО включает ТОЧНУЮ ключевую фразу в начале: "{brand} {product_name} {color}" (например: "Nike Dunk Low White Black – купить").
-Мета-описание 150-160 зн., ОБЯЗАТЕЛЬНО включает ключевую фразу в начале, заканчивается призывом «Купить с доставкой» / «Закажи онлайн».
-Ключевые слова: 3-4 слова (Nike; Dunk Low; кроссовки).
-
-ФОРМАТ ОТВЕТА (ровно 6 строк, без пустых, без комментариев):
-1. Название модели СТРОГО в формате: Бренд Модель Артикул (БЕЗ иероглифов, БЕЗ эмодзи, БЕЗ скобок)
-2. Краткое описание
-3. Полное описание
-4. SEO Title (только латиница + кириллица, БЕЗ иероглифов)
-5. Meta Description
-6. Ключевые слова через точку с запятой (3-4 слова)
-
-КРИТИЧЕСКИ ВАЖНО для строк 1 и 4:
-- ❌ ЗАПРЕЩЕНО использовать китайские/японские иероглифы (定制球鞋、阿卡丽、时尚 и т.д.)
-- ❌ ЗАПРЕЩЕНО использовать спецсимволы (【】、（）等)
-- ✅ ТОЛЬКО латиница (A-Z, a-z) и кириллица (А-Я, а-я)
-- ✅ ОБЯЗАТЕЛЬНО начинай с бренда: {brand} всегда с заглавной буквы
-- ✅ Формат строки 1: "{brand} Модель Артикул" (например: Nike Court Borough BQ5448-115)
-- ✅ Формат строки 4: "{brand} Модель - купить оригинал" (например: Nike Court Borough - купить оригинал)
-
-Пример ПРАВИЛЬНОГО перевода с китайского:
-Исходное название: "【定制球鞋】 Jordan Air Jordan 1 Mid 阿卡丽2 中帮 复古篮球鞋 男款 黑白"
-                        ↓ ПЕРЕВОДИМ ↓
-1. Jordan Air Jordan 1 Mid Akali 2 Black White DQ8426-154
-   (убрали "定制球鞋", перевели "阿卡丽"→"Akali", "黑白"→"Black White", убрали лишнее)
-
-Пример полного ответа (опирайся на стиль):
-1. Nike Dunk Low White Black DD1391-103
-2. Классический двухцветный Dunk Low: белая кожаная основа + чёрные замшевые оверлеи. Подошва средней толщины. Плотная строчка.
-3. Nike Dunk Low White Black DD1391-103 – классика уличного стиля. Nike выпустил эту модель в 2021 году. Дизайн повторяет оригинальный блок 1985-го. Верх сделан из натуральной кожи. Белая гладкая кожа покрывает toe-box. Чёрная замша украшает swoosh и пятку. Перфорация в носке пропускает воздух. Внутри текстильная сетка. Она приятная и не растягивается. Промежуточная подошва из EVA весит на 30% меньше оригинала. Кроссовки подходят для города. Резиновая подметка держит асфальт и плитку. Даже в дождь. В комплекте белые шнурки flat. Есть вторая пара чёрных. Эти кроссовки сочетаются с джинсами-скинни. С карго тоже. С летними шортами отлично. Белый с чёрным всегда в тренде.
-4. Nike Dunk Low White Black DD1391-103 – купить оригинал
-5. Nike Dunk Low White Black DD1391-103 – оригинальные кроссовки в наличии. Бесплатная примерка, доставка по РФ в день заказа. Закажи онлайн!
-6. Nike"""
-
-            # Запрос к OpenAI
-            logger.info(f"[OpenAI] ═══════════════════════════════════════")
-            logger.info(f"[OpenAI] Начинаем генерацию SEO для товара: {title[:50]}...")
-            logger.info(f"[OpenAI] Бренд: {brand}, Категория: {category}")
-            logger.info(f"[OpenAI] Артикул: {article_number}")
-            logger.info(f"[OpenAI] Атрибуты: {attributes}")
-            
-            import openai
-            
-            logger.info(f"[OpenAI] Создаем клиент OpenAI...")
-            
-            logger.info("="*80)
-            logger.info(f"[OpenAI] 🔧 Создаем клиент OpenAI...")
-            client = openai.OpenAI(api_key=self.api_key)
-            logger.info(f"[OpenAI] ✅ Клиент создан: {type(client).__name__}")
-            
-            logger.info(f"[OpenAI] 📤 Отправляем запрос к модели gpt-4o...")
-            logger.info(f"[OpenAI] 📊 Бренд: {brand}, Категория: {category}")
-            logger.info(f"[OpenAI] 📝 Длина промпта: {len(prompt)} символов")
-            logger.info(f"[OpenAI] ⚙️  Параметры: temperature=0.7, max_tokens=1500")
-            
-            # Вызов OpenAI с Circuit Breaker защитой
-            try:
-                response = openai_breaker.call(
-                    lambda: client.chat.completions.create(
-                        model="gpt-5.1",
-                        messages=[
-                            {"role": "system", "content": f"Ты - SEO-копирайтер, эксперт по товарам {brand}."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        temperature=0.7,
-                        max_tokens=1500
-                    )
-                )
-            except CircuitBreakerError:
-                logger.warning("[Circuit Breaker] OpenAI API временно недоступен, используем базовое описание")
-                return {
-                    "title_ru": title,
-                    "seo_title": f"{brand} {title[:50]}",
-                    "short_description": f"Качественный товар {brand} из категории {category}",
-                    "full_description": f"Описание товара {title}. {description[:200] if description else 'Подробное описание будет добавлено позже.'}",
-                    "meta_description": f"{brand} - {title[:80]}"
-                }
-            except Exception as e:
-                logger.error(f"[OpenAI ERROR] Ошибка генерации: {e}")
-                return {
-                    "title_ru": title,
-                    "seo_title": f"{brand} {title[:50]}",
-                    "short_description": f"Качественный товар {brand} из категории {category}",
-                    "full_description": f"Описание товара {title}. {description[:200] if description else 'Подробное описание будет добавлено позже.'}",
-                    "meta_description": f"{brand} - {title[:80]}"
-                }
-            
-            logger.info(f"[OpenAI] 📥 ✅ Получен ответ от API!")
-            logger.info(f"[OpenAI] 🆔 Response ID: {response.id}")
-            logger.info(f"[OpenAI] 🤖 Использована модель: {response.model}")
-            logger.info(f"[OpenAI] 🏁 Finish reason: {response.choices[0].finish_reason}")
-            logger.info(f"[OpenAI] 💰 Токены использовано: prompt={response.usage.prompt_tokens}, completion={response.usage.completion_tokens}, total={response.usage.total_tokens}")
-            
-            result_text = response.choices[0].message.content.strip()
-            logger.info(f"[OpenAI] 📄 Длина ответа: {len(result_text)} символов")
-            logger.info(f"[OpenAI] 📋 Первые 300 символов ответа:\n{result_text[:300]}")
-            logger.info(f"[OpenAI] ═══════════════════════════════════════")
-            
-            # Парсим построчный ответ - ожидаем 6 строк
-            logger.info(f"[OpenAI] 🔍 Парсим ответ на строки...")
-            lines = result_text.split('\n')
-            
-            # Убираем пустые строки и нумерацию
-            parsed_lines = []
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                # Убираем "1. ", "2. ", "3. " и т.д.
-                if line and len(line) > 3:
-                    if line[0].isdigit() and line[1:3] in ['. ', ') ', ': ']:
-                        line = line[3:].strip()
-                    elif line[:2].isdigit() and line[2:4] in ['. ', ') ', ': ']:
-                        line = line[4:].strip()
-                
-                if line:
-                    parsed_lines.append(line)
-            
-            # Логируем что получили
-            logger.info(f"[OpenAI] 📊 Распарсено {len(parsed_lines)} строк")
-            for i, line in enumerate(parsed_lines[:6], 1):
-                logger.info(f"[OpenAI]   Строка {i}: {line[:80]}...")
-            
-            logger.info(f"[OpenAI] 🧹 Очистка от китайских символов...")
-            
-            # Функция для АГРЕССИВНОЙ очистки текста от иероглифов
-            import re
-            
-            def clean_chinese_chars(text: str) -> str:
-                """ИЗВЛЕКАЕТ только латиницу, КИРИЛЛИЦУ, цифры и базовые символы из текста"""
-                if not text:
-                    return ""
-                
-                result = []
-                for char in text:
-                    code = ord(char)
-                    # ASCII латиница и цифры
-                    if (0x0041 <= code <= 0x005A or   # A-Z
-                        0x0061 <= code <= 0x007A or   # a-z
-                        0x0030 <= code <= 0x0039 or   # 0-9
-                        code == 0x0020 or              # пробел
-                        code == 0x002D or              # тире -
-                        code == 0x0027 or              # апостроф '
-                        code == 0x002E or              # точка .
-                        code == 0x002C or              # запятая ,
-                        code == 0x002F):               # слэш /
-                        result.append(char)
-                    # КИРИЛЛИЦА
-                    elif (0x0410 <= code <= 0x042F or  # А-Я
-                          0x0430 <= code <= 0x044F or  # а-я
-                          code == 0x0401 or            # Ё
-                          code == 0x0451):             # ё
-                        result.append(char)
-                    # Полноширинные латинские
-                    elif 0xFF21 <= code <= 0xFF3A:  # Ａ-Ｚ
-                        result.append(chr(code - 0xFEE0))
-                    elif 0xFF41 <= code <= 0xFF5A:  # ａ-ｚ
-                        result.append(chr(code - 0xFEE0))
-                    elif 0xFF10 <= code <= 0xFF19:  # ０-９
-                        result.append(chr(code - 0xFEE0))
-                
-                text = ''.join(result)
-                text = re.sub(r'\s+', ' ', text).strip()
-                text = text.lstrip('/').strip(' -.,/')
-                
-                if not text or len(text) < 3:
-                    return ""
-                
-                return text
-            
-            # Очищаем строки
-            title_clean = clean_chinese_chars(parsed_lines[0] if len(parsed_lines) > 0 else title)
-            seo_title_clean = clean_chinese_chars(parsed_lines[3] if len(parsed_lines) > 3 else title)
-            
-            logger.info(f"После очистки: title='{title_clean}', seo_title='{seo_title_clean}'")
-            
-            # Fallback если пусто
-            if not title_clean or len(title_clean.strip()) < 5 or title_clean.strip() in ['-', '-(', '-(-', '(', ')']:
-                title_clean = f"{brand} {article_number}".strip() if article_number else brand
-            
-            if not seo_title_clean or len(seo_title_clean.strip()) < 5 or seo_title_clean.strip() in ['-', '-(', '-(-', '(', ')']:
-                seo_title_clean = title_clean + " - купить оригинал"
-            
-            # Очищаем бренд
-            brand_for_title = clean_chinese_chars(brand)
-            if not brand_for_title or len(brand_for_title) < 2:
-                brand_for_title = brand
-            
-            # Добавляем бренд если его нет
-            brand_upper = brand_for_title.upper()
-            
-            if title_clean and brand_upper not in title_clean.upper():
-                title_clean = f"{brand_for_title} {title_clean}"
-            
-            if seo_title_clean and brand_upper not in seo_title_clean.upper():
-                seo_title_clean = f"{brand_for_title} {seo_title_clean}"
-            
-            # Получаем описание
-            full_description = parsed_lines[2] if len(parsed_lines) > 2 else f"Описание {title}"
-            
-            # Очищаем keywords
-            keywords_raw = parsed_lines[5] if len(parsed_lines) > 5 else f"{brand}, {category}"
-            keywords_clean = clean_chinese_chars(keywords_raw)
-            
-            result = {
-                "title_ru": title_clean,
-                "short_description": parsed_lines[1] if len(parsed_lines) > 1 else f"Товар {brand}",
-                "full_description": full_description,
-                "seo_title": seo_title_clean,
-                "meta_description": parsed_lines[4] if len(parsed_lines) > 4 else f"{brand} - купить онлайн",
-                "keywords": keywords_clean
-            }
-            
-            logger.info("="*80)
-            logger.info(f"[OpenAI] ✅ ФИНАЛЬНЫЙ РЕЗУЛЬТАТ:")
-            logger.info(f"[OpenAI]   📌 title_ru: {result.get('title_ru', '')[:80]}")
-            logger.info(f"[OpenAI]   📌 seo_title: {result.get('seo_title', '')[:80]}")
-            logger.info(f"[OpenAI]   📌 short_description (длина): {len(result.get('short_description', ''))} символов")
-            logger.info(f"[OpenAI]   📌 full_description (длина): {len(result.get('full_description', ''))} символов")
-            logger.info(f"[OpenAI]   📌 meta_description: {result.get('meta_description', '')[:80]}")
-            logger.info(f"[OpenAI]   📌 keywords: {result.get('keywords', '')}")
-            logger.info("="*80)
-            return result
-            
-        except Exception as e:
-            logger.error("="*80)
-            logger.error(f"[OpenAI] ❌ КРИТИЧЕСКАЯ ОШИБКА!")
-            logger.error(f"[OpenAI] 🔥 Тип ошибки: {type(e).__name__}")
-            logger.error(f"[OpenAI] 💬 Сообщение: {e}")
-            import traceback
-            logger.error(f"[OpenAI] 📜 Полный traceback:")
-            logger.error(traceback.format_exc())
-            logger.warning(f"[OpenAI] ⚠️  Возвращаем fallback данные...")
-            logger.error("="*80)
-            # Возвращаем базовую обработку в случае ошибки
-            return {
-                "title_ru": title,
-                "seo_title": f"{brand} {title[:50]}",
-                "short_description": f"Качественный товар {brand} из категории {category}",
-                "full_description": f"Описание товара {title}. {description[:200] if description else 'Подробное описание будет добавлено позже.'}",
-                "meta_description": f"{brand} - {title[:80]}"
-            }
-
-
 class ProductProcessor:
-    """Обработчик товаров: Poizon → OpenAI → WordPress"""
+    """Обработчик товаров: Poizon → GPT-5 Nano → WordPress"""
     
     def __init__(
         self,
         poizon: PoisonAPIService,
-        openai_service: OpenAIService,
         woocommerce: WooCommerceService,
         settings: SyncSettings,
         session_id: str = None
     ):
         """Инициализация процессора"""
         self.poizon = poizon
-        self.openai = openai_service
         self.woocommerce = woocommerce
         self.settings = settings
         self.session_id = session_id
@@ -928,89 +484,19 @@ class ProductProcessor:
             # Шаг 1: Получение данных из Poizon
             self._update_status(product_key, 'processing', 10, 'Загрузка из Poizon API...')
             
+            # get_product_full_info() автоматически вызывает generate_seo_content()
+            # и заполняет все SEO поля (seo_title, short_description, description, meta_description, keywords, tags)
             product = self.poizon.get_product_full_info(spu_id)
             if not product:
                 return self._update_status(product_key, 'error', 0, 'Не удалось загрузить товар')
             
-            # КРИТИЧЕСКИ ВАЖНО: ВСЕГДА очищаем бренд из API, НЕ используем override_brand!
-            # override_brand используется только для ПОИСКА товаров, но НЕ для названия!
-            import re
-            def extract_latin_only(text: str) -> str:
-                """Извлекает только латиницу, цифры, тире, точку и слэш"""
-                if not text:
-                    return ""
-                result = []
-                for char in text:
-                    code = ord(char)
-                    if (0x0041 <= code <= 0x005A or   # A-Z
-                        0x0061 <= code <= 0x007A or   # a-z
-                        0x0030 <= code <= 0x0039 or   # 0-9
-                        code == 0x0020 or              # пробел
-                        code == 0x002D or              # тире -
-                        code == 0x002F or              # слэш /
-                        code == 0x002E):               # точка .
-                        result.append(char)
-                return ''.join(result).strip()
+            # Шаг 2: SEO контент уже сгенерирован в get_product_full_info()
+            self._update_status(product_key, 'processing', 60, 'SEO контент сгенерирован через GPT-5 Nano')
             
-            original_brand = product.brand
-            original_article = product.article_number
-            
-            # ВСЕГДА очищаем бренд из API (он может содержать иероглифы)
-            product.brand = extract_latin_only(product.brand) or "Brand"
-            logger.info(f"Бренд из API: '{original_brand}' → '{product.brand}'")
-            
-            product.article_number = extract_latin_only(product.article_number) or product.article_number
-            logger.info(f"Артикул: '{original_article}' → '{product.article_number}'")
-            
-            # Шаг 2: Обработка через OpenAI
-            self._update_status(product_key, 'openai', 40, 'Обработка через OpenAI...')
-            
-            seo_data = self.openai.translate_and_generate_seo(
-                title=product.title,
-                description=product.description,
-                category=product.category,
-                brand=product.brand,  # Теперь это очищенный бренд!
-                attributes=product.attributes,
-                article_number=product.article_number
-            )
-            
-            # Обновляем данные товара ВСЕМИ полями из OpenAI
-            product.title = seo_data['title_ru']  # Название модели
-            product.description = seo_data['full_description']  # Полное описание
-            product.short_description = seo_data.get('short_description', '')  # Краткое описание
-            product.seo_title = seo_data.get('seo_title', seo_data['title_ru'])  # SEO Title
-            product.meta_description = seo_data.get('meta_description', '')  # Meta Description
-            product.keywords = seo_data.get('keywords', '')  # Ключевые слова
-            
-            logger.info(f"Обновленные поля товара:")
-            logger.info(f"  product.title: {product.title[:80]}")
-            logger.info(f"  product.seo_title: {product.seo_title[:80]}")
-            
-            # Шаг 2.5: Перевод цветов в вариациях через OpenAI
-            if product.variations:
-                logger.info(f"Переводим цвета в {len(product.variations)} вариациях...")
-                unique_colors = set()
-                color_translations = {}
-                
-                # Собираем уникальные цвета
-                for variation in product.variations:
-                    if 'color' in variation and variation['color']:
-                        unique_colors.add(variation['color'])
-                
-                # Переводим каждый уникальный цвет
-                for color in unique_colors:
-                    translated = self.openai.translate_color(color)
-                    color_translations[color] = translated
-                
-                # Применяем переводы к вариациям
-                for variation in product.variations:
-                    if 'color' in variation and variation['color']:
-                        original_color = variation['color']
-                        variation['color'] = color_translations.get(original_color, original_color)
-                
-                logger.info(f"Переведено цветов: {len(color_translations)}")
-                for orig, trans in color_translations.items():
-                    logger.info(f"  {orig} → {trans}")
+            logger.info(f"SEO поля товара:")
+            logger.info(f"  product.seo_title: {getattr(product, 'seo_title', 'N/A')[:80]}")
+            logger.info(f"  product.short_description: {len(getattr(product, 'short_description', ''))} символов")
+            logger.info(f"  product.description: {len(getattr(product, 'description', ''))} символов")
             
             # Шаг 3: Проверка существования в WordPress
             self._update_status(product_key, 'wordpress', 70, 'Проверка существования в WordPress...')
@@ -1105,7 +591,7 @@ openai_breaker = get_circuit_breaker(
 # Инициализация при запуске
 def init_services():
     """Инициализация всех сервисов с защитой Circuit Breaker"""
-    global poizon_client, woocommerce_client, openai_client
+    global poizon_client, woocommerce_client
     
     # Предотвращаем дублирование логов в режиме DEBUG (Flask запускает процесс дважды)
     # Показываем логи инициализации только в главном процессе
@@ -1114,10 +600,10 @@ def init_services():
     try:
         poizon_client = PoisonAPIService()
         woocommerce_client = WooCommerceService()
-        openai_client = OpenAIService()
         
         if not is_reloader:
             logger.info("[OK] Все сервисы инициализированы с Circuit Breaker защитой")
+            logger.info("[INFO] GPT-5 Nano интегрирован в poizon_client.generate_seo_content()")
     except Exception as e:
         logger.error(f"[ERROR] Ошибка инициализации сервисов: {e}")
         raise
@@ -1953,7 +1439,6 @@ def upload_products():
                 # Создаем процессор с передачей session_id
                 processor = ProductProcessor(
                     poizon_client,
-                    openai_client,
                     woocommerce_client,
                     settings,
                     session_id  # Передаем session_id в процессор
