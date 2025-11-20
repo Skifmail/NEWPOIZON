@@ -7,6 +7,15 @@ Celery задачи для фоновой обработки.
 - Обработка изображений
 - Очистка кеша
 """
+import sys
+import os
+from pathlib import Path
+
+# Добавляем корень проекта в PYTHONPATH для корректного импорта модулей
+project_root = Path(__file__).parent.absolute()
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 import logging
 from celery import Task
 from celery_config import app
