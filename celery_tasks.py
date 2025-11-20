@@ -235,43 +235,49 @@ def update_categories_cache():
         return {'status': 'error', 'message': str(e)}
 
 
-@app.task(bind=True, name='celery_tasks.batch_upload_products')
-def batch_upload_products(self, product_ids: list, settings: dict):
+@app.task(name='celery_tasks.batch_upload_callback')
+def batch_upload_callback(results):
+    """Callback для завершения пакетной загрузки (вызывается после всех подзадач)"""
+    # Собираем статистику
+    created = sum(1 for r in results if r and r.get('status') == 'created')
+    updated = sum(1 for r in results if r and r.get('status') == 'updated')
+    errors = sum(1 for r in results if r and r.get('status') == 'error')
+    
+    logger.info(f"[TASK] Пакетная загрузка завершена: создано={created}, обновлено={updated}, ошибок={errors}")
+    
+    return {
+        'status': 'success',
+        'total': len(results),
+        'created': created,
+        'updated': updated,
+        'errors': errors,
+        'results': results
+    }
+
+
+def batch_upload_products(product_ids: list, settings: dict):
     """
     Пакетная загрузка товаров (запускает подзадачи для каждого товара).
+    НЕ является Celery задачей - просто запускает группу задач через chord.
     
     Args:
         product_ids: Список ID товаров
         settings: Настройки синхронизации
         
     Returns:
-        Результаты загрузки
+        AsyncResult chord'а
     """
-    from celery import group
+    from celery import chord
     
-    logger.info(f"[TASK] Пакетная загрузка {len(product_ids)} товаров...")
+    logger.info(f"[TASK] Запуск пакетной загрузки {len(product_ids)} товаров...")
     
-    # Создаем группу подзадач
-    job = group(upload_product.s(spu_id, settings) for spu_id in product_ids)
+    # Создаем chord: группа задач + callback после завершения всех
+    callback = batch_upload_callback.s()
+    header = [upload_product.s(spu_id, settings) for spu_id in product_ids]
     
-    # Запускаем параллельно
-    result = job.apply_async()
+    # Запускаем chord (группа задач с финальным callback)
+    result = chord(header)(callback)
     
-    # Ждем завершения всех
-    results = result.get(timeout=3600)
+    logger.info(f"[TASK] Chord запущен: {result.id}")
     
-    # Собираем статистику
-    created = sum(1 for r in results if r.get('status') == 'created')
-    updated = sum(1 for r in results if r.get('status') == 'updated')
-    errors = sum(1 for r in results if r.get('status') == 'error')
-    
-    logger.info(f"[TASK] Пакетная загрузка завершена: создано={created}, обновлено={updated}, ошибок={errors}")
-    
-    return {
-        'status': 'success',
-        'total': len(product_ids),
-        'created': created,
-        'updated': updated,
-        'errors': errors,
-        'results': results
-    }
+    return result
