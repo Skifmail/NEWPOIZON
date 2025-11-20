@@ -83,6 +83,7 @@ def upload_product(
                 WooCommerceService,
                 SyncSettings
             )
+            from openai_service import OpenAIService  # Новый импорт
         except ImportError as e:
             logger.error(f"[IMPORT ERROR] Failed to import service: {e}")
             logger.error(f"[DEBUG] CWD: {os.getcwd()}")
@@ -90,7 +91,7 @@ def upload_product(
             raise
 
         from poizon_api_fixed import PoisonAPIClientFixed
-        from web_app import OpenAIService
+        # from web_app import OpenAIService  # УДАЛЕНО: вызывало циклический импорт
         
         # Получаем circuit breaker
         poizon_cb = get_circuit_breaker('poizon_api', failure_threshold=5, recovery_timeout=60)

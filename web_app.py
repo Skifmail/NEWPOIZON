@@ -53,6 +53,7 @@ from poizon_to_wordpress_service import (
     SyncSettings
 )
 from poizon_api_fixed import PoisonAPIClientFixed as PoisonAPIService
+from openai_service import OpenAIService  # Новый импорт из отдельного файла
 
 # Импорт новых улучшений
 # Fallback-импорты: если модулей нет в проекте, используем простые заглушки
