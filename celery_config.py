@@ -8,6 +8,14 @@
 - Периодическая очистка кеша
 - Периодическое обновление брендов/категорий
 """
+import sys
+from pathlib import Path
+
+# Добавляем корень проекта в PYTHONPATH для корректного импорта модулей
+project_root = Path(__file__).parent.absolute()
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 import os
 from celery import Celery
 from celery.schedules import crontab
