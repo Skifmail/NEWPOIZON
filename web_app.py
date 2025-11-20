@@ -1336,8 +1336,9 @@ def get_task_status(task_id):
     
     try:
         from celery.result import AsyncResult
+        from celery_config import app as celery_app
         
-        task = AsyncResult(task_id, app=batch_upload_products.app)
+        task = AsyncResult(task_id, app=celery_app)
         
         response = {
             'success': True,
