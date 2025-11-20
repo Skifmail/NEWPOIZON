@@ -1417,8 +1417,8 @@ def upload_products():
         if CELERY_AVAILABLE:
             logger.info("[Celery] Запускаем фоновую задачу обработки товаров")
             
-            # Запускаем Celery задачу асинхронно
-            task = batch_upload_products.delay(
+            # Запускаем chord (batch_upload_products теперь возвращает chord, а не задачу)
+            chord_result = batch_upload_products(
                 product_ids=product_ids,
                 settings={
                     'currency_rate': settings_data.get('currency_rate', 13.5),
@@ -1426,13 +1426,13 @@ def upload_products():
                 }
             )
             
-            logger.info(f"[Celery] Задача создана: {task.id}")
+            logger.info(f"[Celery] Chord запущен: {chord_result.id}")
             
             # Сразу возвращаем session_id клиенту
             return jsonify({
                 'success': True,
                 'session_id': session_id,
-                'task_id': task.id,
+                'task_id': chord_result.id,
                 'total': len(product_ids),
                 'mode': 'celery'
             })
