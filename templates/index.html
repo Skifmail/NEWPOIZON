@@ -442,6 +442,86 @@
                 transform: translateY(0);
             }
         }
+
+        /* Task Manager Styles */
+        #taskManagerContainer {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 350px;
+            z-index: 10000;
+            display: none;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .task-card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            margin-bottom: 10px;
+            overflow: hidden;
+            border-left: 5px solid var(--primary-color);
+            transition: all 0.3s ease;
+            animation: slideInRight 0.3s ease-out;
+        }
+        
+        @keyframes slideInRight {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .task-header {
+            padding: 10px 15px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .task-title {
+            font-weight: 600;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .task-close {
+            cursor: pointer;
+            color: #999;
+            transition: color 0.2s;
+        }
+        
+        .task-close:hover {
+            color: #dc3545;
+        }
+        
+        .task-body {
+            padding: 15px;
+        }
+        
+        .task-status {
+            font-size: 0.85rem;
+            color: #666;
+            margin-bottom: 8px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .task-progress-wrapper {
+            margin-bottom: 5px;
+        }
+        
+        .task-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: #888;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -711,11 +791,215 @@
         <i class="fas fa-chevron-down"></i>
     </div>
     
+    <!-- Task Manager Container -->
+    <div id="taskManagerContainer"></div>
+    
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     
     <!-- Main Script -->
     <script>
+        // ========================================================================
+        // TASK MANAGER CLASS
+        // ========================================================================
+        class TaskManager {
+            constructor() {
+                this.tasks = new Map();
+                this.container = document.getElementById('taskManagerContainer');
+            }
+
+            addTask(taskId, totalProducts, type = 'upload', isGroup = false) {
+                const task = {
+                    id: taskId,
+                    total: totalProducts,
+                    current: 0,
+                    status: 'starting',
+                    type: type,
+                    isGroup: isGroup,
+                    startTime: new Date(),
+                    element: this.createTaskElement(taskId, type, totalProducts)
+                };
+                
+                this.tasks.set(taskId, task);
+                this.container.style.display = 'block';
+                this.container.appendChild(task.element);
+                
+                // Start polling
+                this.startPolling(taskId);
+                
+                return task;
+            }
+
+            createTaskElement(taskId, type, total) {
+                const div = document.createElement('div');
+                div.className = 'task-card';
+                div.id = `task-${taskId}`;
+                
+                const title = type === 'upload' ? 'Загрузка товаров' : 'Обновление товаров';
+                const icon = type === 'upload' ? 'fa-cloud-upload-alt' : 'fa-sync-alt';
+                
+                div.innerHTML = `
+                    <div class="task-header">
+                        <div class="task-title">
+                            <i class="fas ${icon}"></i> ${title}
+                        </div>
+                        <div class="task-close" onclick="taskManager.removeTask('${taskId}')">
+                            <i class="fas fa-times"></i>
+                        </div>
+                    </div>
+                    <div class="task-body">
+                        <div class="task-status" id="status-${taskId}">Инициализация...</div>
+                        <div class="progress task-progress-wrapper" style="height: 8px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                 id="progress-${taskId}" 
+                                 role="progressbar" 
+                                 style="width: 0%"></div>
+                        </div>
+                        <div class="task-meta">
+                            <span id="count-${taskId}">0 / ${total}</span>
+                            <span id="percent-${taskId}">0%</span>
+                        </div>
+                    </div>
+                `;
+                
+                return div;
+            }
+
+            updateTask(taskId, current, total, status, state = 'PROGRESS') {
+                const task = this.tasks.get(taskId);
+                if (!task) return;
+                
+                task.current = current;
+                task.status = status;
+                
+                // Update UI
+                const percent = Math.round((current / total) * 100);
+                const progressBar = document.getElementById(`progress-${taskId}`);
+                const statusEl = document.getElementById(`status-${taskId}`);
+                const countEl = document.getElementById(`count-${taskId}`);
+                const percentEl = document.getElementById(`percent-${taskId}`);
+                
+                if (progressBar) progressBar.style.width = `${percent}%`;
+                if (statusEl) statusEl.textContent = status;
+                if (countEl) countEl.textContent = `${current} / ${total}`;
+                if (percentEl) percentEl.textContent = `${percent}%`;
+                
+                // Change color based on state
+                if (state === 'SUCCESS') {
+                    progressBar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+                    progressBar.classList.add('bg-success');
+                    document.getElementById(`task-${taskId}`).style.borderLeftColor = 'var(--secondary-color)';
+                } else if (state === 'FAILURE') {
+                    progressBar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+                    progressBar.classList.add('bg-danger');
+                    document.getElementById(`task-${taskId}`).style.borderLeftColor = 'var(--danger-color)';
+                }
+            }
+
+            removeTask(taskId) {
+                const task = this.tasks.get(taskId);
+                if (task) {
+                    task.element.remove();
+                    this.tasks.delete(taskId);
+                    
+                    if (this.tasks.size === 0) {
+                        this.container.style.display = 'none';
+                    }
+                }
+            }
+
+            startPolling(taskId) {
+                let pollCount = 0;
+                const maxPolls = 3600; // 1 час
+                const task = this.tasks.get(taskId);
+                const endpoint = task.isGroup ? `/api/group-status/${taskId}` : `/api/task-status/${taskId}`;
+                
+                const pollInterval = setInterval(async () => {
+                    pollCount++;
+                    
+                    try {
+                        const response = await fetch(endpoint);
+                        const data = await response.json();
+                        
+                        if (!data.success) {
+                            this.updateTask(taskId, 0, 0, `Ошибка: ${data.error}`, 'FAILURE');
+                            clearInterval(pollInterval);
+                            return;
+                        }
+                        
+                        if (task.isGroup) {
+                            // Logic for Group Status
+                            const percent = data.progress;
+                            const completed = data.completed;
+                            const total = data.total || task.total;
+                            
+                            this.updateTask(taskId, completed, total, `Обработано: ${completed}/${total}`, 'PROGRESS');
+                            
+                            if (data.ready) {
+                                clearInterval(pollInterval);
+                                const results = data.results;
+                                let successCount = 0;
+                                if (results && Array.isArray(results)) {
+                                    successCount = results.filter(r => r && (r.status === 'completed' || r.status === 'created' || r.status === 'updated')).length;
+                                }
+                                
+                                this.updateTask(taskId, total, total, `Готово! Успешно: ${successCount}`, 'SUCCESS');
+                                showNotification(`Задача завершена! Успешно: ${successCount}`, 'success');
+                                
+                                if (task.type === 'upload') {
+                                    selectedProducts.clear();
+                                    renderProducts(allProducts, true);
+                                    updateSelectedCount();
+                                }
+                            }
+                        } else {
+                            // Logic for Single Task Status (Old logic)
+                            if (data.state === 'PROGRESS' && data.progress) {
+                                this.updateTask(taskId, data.progress.current, data.progress.total, data.progress.status);
+                            } else if (data.ready) {
+                                clearInterval(pollInterval);
+                                
+                                if (data.status === 'completed') {
+                                    const result = data.result;
+                                    let completed = 0;
+                                    
+                                    if (result && result.results && Array.isArray(result.results)) {
+                                        completed = (result.created || 0) + (result.updated || 0);
+                                    } else if (Array.isArray(result)) {
+                                        completed = result.filter(r => r.status === 'completed' || r.status === 'created' || r.status === 'updated').length;
+                                    } else {
+                                        completed = 1;
+                                    }
+                                    
+                                    this.updateTask(taskId, this.tasks.get(taskId).total, this.tasks.get(taskId).total, `Готово! Успешно: ${completed}`, 'SUCCESS');
+                                    showNotification(`Задача завершена! Успешно: ${completed}`, 'success');
+                                    
+                                    if (this.tasks.get(taskId).type === 'upload') {
+                                        selectedProducts.clear();
+                                        renderProducts(allProducts, true);
+                                        updateSelectedCount();
+                                    }
+                                } else {
+                                    this.updateTask(taskId, 0, 0, `Ошибка: ${data.error}`, 'FAILURE');
+                                    showNotification(`Ошибка задачи: ${data.error}`, 'danger');
+                                }
+                            }
+                        }
+                        
+                        if (pollCount >= maxPolls) {
+                            clearInterval(pollInterval);
+                            this.updateTask(taskId, 0, 0, 'Таймаут ожидания', 'FAILURE');
+                        }
+                        
+                    } catch (error) {
+                        console.error('Polling error:', error);
+                    }
+                }, 2000); // Опрос раз в 2 секунды
+            }
+        }
+        
+        const taskManager = new TaskManager();
+
         // Глобальные переменные
         let selectedProducts = new Set();
         let allProducts = [];
@@ -741,33 +1025,6 @@
                 }
             });
         });
-        
-        // Event Listeners
-        function initEventListeners() {
-            document.getElementById('brandSelect').addEventListener('change', onBrandChange);
-            document.getElementById('categorySelect').addEventListener('change', onCategoryChange);
-            document.getElementById('uploadBtn').addEventListener('click', uploadProducts);
-            document.getElementById('uploadBtnTop').addEventListener('click', uploadProducts);
-            document.getElementById('selectAllBtn').addEventListener('click', selectAllProducts);
-            document.getElementById('selectAllBtnTop').addEventListener('click', selectAllProducts);
-            document.getElementById('deselectAllBtn').addEventListener('click', deselectAllProducts);
-            document.getElementById('deselectAllBtnTop').addEventListener('click', deselectAllProducts);
-            document.getElementById('currencyRate').addEventListener('input', updatePriceExample);
-            document.getElementById('markupRubles').addEventListener('input', updatePriceExample);
-            document.getElementById('prevPageBtn').addEventListener('click', prevPage);
-            document.getElementById('nextPageBtn').addEventListener('click', nextPage);
-        }
-        
-        // Update price example
-        function updatePriceExample() {
-            const rate = parseFloat(document.getElementById('currencyRate').value) || 13.5;
-            const markup = parseFloat(document.getElementById('markupRubles').value) || 5000;
-            const example = Math.round(100 * rate + markup);
-            
-            document.getElementById('rateDisplay').textContent = rate;
-            document.getElementById('markupDisplay').textContent = markup;
-            document.getElementById('priceExample').textContent = example;
-        }
         
         // Event Listeners
         function initEventListeners() {
@@ -1243,24 +1500,7 @@
             };
             
             // Показываем overlay-индикатор загрузки
-            showLoading(true, `Загрузка ${selectedProducts.size} товаров в WordPress...\n\nЭто может занять несколько минут`);
-            
-            // Show progress section
-            document.getElementById('progressSection').style.display = 'block';
-            document.getElementById('progressLog').innerHTML = '';
-            document.getElementById('progressBar').style.width = '0%';
-            document.getElementById('progressBar').textContent = '0%';
-            document.getElementById('progressText').textContent = 'Инициализация...';
-            document.getElementById('uploadBtn').disabled = true;
-            document.getElementById('uploadBtnTop').disabled = true;
-            
-            // Автопрокрутка к блоку прогресса
-            setTimeout(() => {
-                const progressSection = document.getElementById('progressSection');
-                if (progressSection) {
-                    progressSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }
-            }, 300);
+            showLoading(true, `Инициализация загрузки ${selectedProducts.size} товаров...`);
             
             try {
                 // Step 1: Start upload and get session_id
@@ -1272,7 +1512,6 @@
                     body: JSON.stringify({
                         product_ids: Array.from(selectedProducts),
                         settings: settings
-                        // Бренд НЕ передаем - он берется из Poizon API для каждого товара
                     })
                 });
                 
@@ -1280,9 +1519,6 @@
                 
                 if (!data.success) {
                     showNotification('Ошибка: ' + data.error, 'danger');
-                    document.getElementById('progressSection').style.display = 'none';
-                    document.getElementById('uploadBtn').disabled = false;
-                    document.getElementById('uploadBtnTop').disabled = false;
                     showLoading(false);
                     return;
                 }
@@ -1291,154 +1527,95 @@
                 const totalProducts = data.total;
                 const mode = data.mode; // 'celery' или 'threading'
                 const taskId = data.task_id; // Только для Celery
-                let currentProduct = 0;
-                let results = [];
                 
                 // Step 2: Разные стратегии для Celery и Threading
                 if (mode === 'celery' && taskId) {
-                    // CELERY MODE: опрашиваем статус задачи
-                    addProgressLog(`🚀 Задача запущена (Celery): ${taskId.substring(0, 8)}...`, 'info');
-                    showLoading(false); // Сразу убираем overlay
+                    // CELERY MODE: Используем TaskManager
+                    showLoading(false); // Убираем блокирующий экран
                     
-                    let pollCount = 0;
-                    const maxPolls = 600; // 10 минут (1 раз в секунду)
+                    // Добавляем задачу в менеджер (isGroup = true)
+                    taskManager.addTask(taskId, totalProducts, 'upload', true);
                     
-                    const pollInterval = setInterval(async () => {
-                        pollCount++;
-                        
-                        try {
-                            const statusResponse = await fetch(`/api/task-status/${taskId}`);
-                            const statusData = await statusResponse.json();
-                            
-                            if (!statusData.success) {
-                                clearInterval(pollInterval);
-                                addProgressLog(`❌ Ошибка проверки статуса: ${statusData.error}`, 'danger');
-                                showNotification('Ошибка: ' + statusData.error, 'danger');
-                                document.getElementById('uploadBtn').disabled = false;
-                                document.getElementById('uploadBtnTop').disabled = false;
-                                return;
-                            }
-                            
-                            // Обновляем прогресс (примерно, т.к. у нас нет детального прогресса в Celery)
-                            if (statusData.state === 'PROGRESS' && statusData.progress) {
-                                updateProgress(statusData.progress.current, statusData.progress.total, statusData.progress.status || 'Обработка...');
-                            }
-                            
-                            // Задача завершена
-                            if (statusData.ready) {
-                                clearInterval(pollInterval);
-                                
-                                if (statusData.status === 'completed') {
-                                    const result = statusData.result;
-                                    
-                                    if (Array.isArray(result)) {
-                                        // Результаты batch_upload_products
-                                        results = result;
-                                        const completed = result.filter(r => r.status === 'completed').length;
-                                        const errors = result.filter(r => r.status === 'error').length;
-                                        
-                                        addProgressLog(`✨ Обработка завершена! Успешно: ${completed}, Ошибок: ${errors}`, 'success');
-                                        showResults({results: results, total: result.length, completed: completed, errors: errors});
-                                        showNotification(`Загружено: ${completed} из ${result.length}`, 'success');
-                                        updateProgress(totalProducts, totalProducts, 'Готово!');
-                                    } else {
-                                        // Одиночный результат upload_product
-                                        if (result.status === 'error') {
-                                            addProgressLog(`❌ Ошибка: ${result.message}`, 'danger');
-                                            showNotification('Ошибка: ' + result.message, 'danger');
-                                        } else {
-                                            addProgressLog(`✅ Товар обработан: ${result.message || result.status}`, 'success');
-                                            showNotification('Товар загружен успешно', 'success');
-                                        }
-                                        updateProgress(1, 1, 'Готово!');
-                                    }
-                                    
-                                    // Очищаем выбранные товары
-                                    selectedProducts.clear();
-                                    renderProducts(allProducts, true);
-                                    updateSelectedCount();
-                                } else {
-                                    // Ошибка
-                                    addProgressLog(`❌ Задача завершилась с ошибкой: ${statusData.error || 'Неизвестная ошибка'}`, 'danger');
-                                    showNotification('Ошибка выполнения задачи', 'danger');
-                                }
-                                
-                                document.getElementById('uploadBtn').disabled = false;
-                                document.getElementById('uploadBtnTop').disabled = false;
-                            }
-                            
-                            // Таймаут
-                            if (pollCount >= maxPolls) {
-                                clearInterval(pollInterval);
-                                addProgressLog(`⏱️ Превышено время ожидания (10 минут)`, 'danger');
-                                showNotification('Превышено время ожидания', 'danger');
-                                document.getElementById('uploadBtn').disabled = false;
-                                document.getElementById('uploadBtnTop').disabled = false;
-                            }
-                        } catch (error) {
-                            clearInterval(pollInterval);
-                            addProgressLog(`❌ Ошибка опроса статуса: ${error.message}`, 'danger');
-                            showNotification('Ошибка соединения', 'danger');
-                            document.getElementById('uploadBtn').disabled = false;
-                            document.getElementById('uploadBtnTop').disabled = false;
-                        }
-                    }, 1000); // Опрос каждую секунду
+                    showNotification(`Задача запущена в фоне. Вы можете продолжить работу.`, 'info');
+                    
+                    // Очищаем выбор, так как задача ушла в фон
+                    selectedProducts.clear();
+                    renderProducts(allProducts, true);
+                    updateSelectedCount();
                     
                 } else {
-                    // THREADING MODE: используем SSE для real-time прогресса
+                    // THREADING MODE: используем SSE для real-time прогресса (старый режим)
+                    // Show progress section
+                    document.getElementById('progressSection').style.display = 'block';
+                    document.getElementById('progressLog').innerHTML = '';
+                    document.getElementById('progressBar').style.width = '0%';
+                    document.getElementById('progressBar').textContent = '0%';
+                    document.getElementById('progressText').textContent = 'Инициализация...';
+                    document.getElementById('uploadBtn').disabled = true;
+                    document.getElementById('uploadBtnTop').disabled = true;
+                    
+                    // Автопрокрутка к блоку прогресса
+                    setTimeout(() => {
+                        const progressSection = document.getElementById('progressSection');
+                        if (progressSection) {
+                            progressSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
+                    }, 300);
+
                     const eventSource = new EventSource(`/api/progress/${sessionId}`);
+                    let currentProduct = 0;
+                    let results = [];
                     
                     eventSource.onmessage = function(event) {
                         const message = JSON.parse(event.data);
                     
-                    switch(message.type) {
-                        case 'start':
-                            addProgressLog(`🚀 Начинаем обработку ${message.total} товаров...`, 'info');
-                            // Скрываем overlay после начала обработки
-                            showLoading(false);
-                            break;
-                            
-                        case 'product_start':
-                            currentProduct = message.current;
-                            addProgressLog(`📦 [${message.current}/${message.total}] Обработка товара ${message.spu_id}...`, 'info');
-                            updateProgress(currentProduct, totalProducts, message.message);
-                            break;
-                            
-                        case 'status_update':
-                            addProgressLog(`   ➜ ${message.message}`, 'detail');
-                            break;
-                            
-                        case 'product_done':
-                            const icon = message.status === 'completed' ? '✅' : '❌';
-                            const color = message.status === 'completed' ? 'success' : 'danger';
-                            addProgressLog(`${icon} [${message.current}/${message.total}] ${message.message}`, color);
-                            updateProgress(message.current, totalProducts, message.message);
-                            break;
-                            
-                        case 'complete':
-                            results = message.results;
-                            addProgressLog(`✨ Обработка завершена! Успешно: ${message.completed}, Ошибок: ${message.errors}`, 'success');
-                            showResults({results: results, total: message.total, completed: message.completed, errors: message.errors});
-                            showNotification(`Загружено: ${message.completed} из ${message.total}`, 'success');
-                            
-                            // Очищаем выбранные товары
-                            selectedProducts.clear();
-                            renderProducts(allProducts, true); // Перерисовываем текущий список без повторного запроса к Poizon
-                            updateSelectedCount();
-                            break;
-                            
-                        case 'error':
-                            addProgressLog(`❌ Ошибка: ${message.message}`, 'danger');
-                            showNotification('Ошибка: ' + message.message, 'danger');
-                            break;
-                            
-                        case 'done':
-                            eventSource.close();
-                            document.getElementById('uploadBtn').disabled = false;
-                            document.getElementById('uploadBtnTop').disabled = false;
-                            break;
-                    }
-                };
+                        switch(message.type) {
+                            case 'start':
+                                addProgressLog(`🚀 Начинаем обработку ${message.total} товаров...`, 'info');
+                                showLoading(false);
+                                break;
+                                
+                            case 'product_start':
+                                currentProduct = message.current;
+                                addProgressLog(`📦 [${message.current}/${message.total}] Обработка товара ${message.spu_id}...`, 'info');
+                                updateProgress(currentProduct, totalProducts, message.message);
+                                break;
+                                
+                            case 'status_update':
+                                addProgressLog(`   ➜ ${message.message}`, 'detail');
+                                break;
+                                
+                            case 'product_done':
+                                const icon = message.status === 'completed' ? '✅' : '❌';
+                                const color = message.status === 'completed' ? 'success' : 'danger';
+                                addProgressLog(`${icon} [${message.current}/${message.total}] ${message.message}`, color);
+                                updateProgress(message.current, totalProducts, message.message);
+                                break;
+                                
+                            case 'complete':
+                                results = message.results;
+                                addProgressLog(`✨ Обработка завершена! Успешно: ${message.completed}, Ошибок: ${message.errors}`, 'success');
+                                showResults({results: results, total: message.total, completed: message.completed, errors: message.errors});
+                                showNotification(`Загружено: ${message.completed} из ${message.total}`, 'success');
+                                
+                                // Очищаем выбранные товары
+                                selectedProducts.clear();
+                                renderProducts(allProducts, true);
+                                updateSelectedCount();
+                                break;
+                                
+                            case 'error':
+                                addProgressLog(`❌ Ошибка: ${message.message}`, 'danger');
+                                showNotification('Ошибка: ' + message.message, 'danger');
+                                break;
+                                
+                            case 'done':
+                                eventSource.close();
+                                document.getElementById('uploadBtn').disabled = false;
+                                document.getElementById('uploadBtnTop').disabled = false;
+                                break;
+                        }
+                    };
                 
                     eventSource.onerror = function(error) {
                         console.error('SSE Error:', error);
@@ -1852,6 +2029,7 @@
                     : `${product.min_price}₽ - ${product.max_price}₽`;
                 
                 const stockBadge = product.total_stock > 0 
+ 
                     ? `<span class="badge bg-success">${product.total_stock} шт.</span>`
                     : `<span class="badge bg-danger">Нет в наличии</span>`;
                 
@@ -1981,21 +2159,11 @@
             
             // Show progress section
             document.getElementById('updateProgressSection').style.display = 'block';
+            document.getElementById('updateProgressLog').innerHTML = '';
             document.getElementById('updateProgressBar').style.width = '0%';
             document.getElementById('updateProgressBar').textContent = '0%';
             document.getElementById('updateProgressText').textContent = 'Инициализация...';
             document.getElementById('updatePricesBtn').disabled = true;
-            
-            // Добавляем лог если его нет
-            if (!document.getElementById('updateProgressLog')) {
-                const logDiv = document.createElement('div');
-                logDiv.className = 'mt-3';
-                logDiv.style.cssText = 'max-height: 400px; overflow-y: auto; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 5px; padding: 15px;';
-                logDiv.innerHTML = '<div id="updateProgressLog" style="font-family: \'Courier New\', monospace; font-size: 13px;"></div>';
-                document.getElementById('updateProgressSection').appendChild(logDiv);
-            } else {
-                document.getElementById('updateProgressLog').innerHTML = '';
-            }
             
             // Автопрокрутка к блоку прогресса
             setTimeout(() => {

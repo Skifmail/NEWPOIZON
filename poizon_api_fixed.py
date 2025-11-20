@@ -28,6 +28,7 @@ import urllib3
 import time
 import openai
 import re
+from openai_service import OpenAIService  # Import OpenAIService
 
 # Отключаем SSL предупреждения для работы с API
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -66,8 +67,8 @@ class PoisonAPIClientFixed:
         self.client_id = os.getenv('POIZON_CLIENT_ID')
         self.base_url = "https://poizon-api.com/api/dewu"
         
-        # OpenAI API для генерации описаний
-        self.openai_api_key = os.getenv('OPENAI_API_KEY')
+        # Инициализация сервиса OpenAI
+        self.openai_service = OpenAIService()
         
         if not self.api_key or not self.client_id:
             raise ValueError("POIZON_API_KEY и POIZON_CLIENT_ID должны быть в .env")
@@ -86,11 +87,6 @@ class PoisonAPIClientFixed:
         logger.info("🔌 [Poizon API] Клиент инициализирован")
         logger.info(f"⏱️  [Poizon API] Retry настройки: {self.max_retries} попыток, базовая задержка {self.base_delay}с")
         logger.info(f"🛡️  [Poizon API] Защита от rate limit: {self.request_delay}с между запросами")
-        
-        if self.openai_api_key:
-            logger.info(f"🤖 [OpenAI] API key загружен: {self.openai_api_key[:7]}...{self.openai_api_key[-4:]}")
-        else:
-            logger.warning("⚠️  [OpenAI] API key не найден - SEO-контент не будет генерироваться")
     
     def _make_request_with_retry(self, method: str, url: str, **kwargs) -> Optional[requests.Response]:
         """Выполняет запрос с retry механизмом при ошибках 429/503"""
@@ -304,7 +300,7 @@ class PoisonAPIClientFixed:
     
     def generate_seo_content(self, brand: str, product_type: str, product_name: str, sku: str, color: str = "", material: str = "") -> Optional[Dict]:
         """
-        Генерирует SEO-контент через GPT-4o-mini.
+        Генерирует SEO-контент через OpenAIService.
         
         Args:
             brand: Название бренда
@@ -318,111 +314,35 @@ class PoisonAPIClientFixed:
             Словарь с полями: seo_title, short_description, description, meta_description, keywords, tags
             или None при ошибке
         """
-        if not self.openai_api_key:
-            logger.warning("⚠️  OpenAI API key не настроен - пропускаем генерацию SEO")
-            return None
+        # Формируем атрибуты для передачи в сервис
+        attributes = []
+        if color:
+            attributes.append({'name': 'Color', 'value': color})
+        if material:
+            attributes.append({'name': 'Material', 'value': material})
+            
+        # Вызываем сервис
+        seo_data = self.openai_service.translate_and_generate_seo(
+            title=product_name,
+            description="",
+            category=product_type,
+            brand=brand,
+            attributes=attributes,
+            article_number=sku
+        )
         
-        try:
-            # Формируем промпт точно как в успешном скрипте fix_product_descriptions.py
-            prompt = f"""Создай SEO-контент для товара.
-
-ДАННЫЕ:
-- Бренд: {brand}
-- Товар: {product_type} {brand} {product_name}
-- Артикул: {sku}
-- Цвет: {color}
-- Материал: {material}
-
-ФОРМАТ ОТВЕТА (6 строк):
-1. {product_type} {brand} {product_name}
-2. Краткое описание (200-350 символов)
-3. Полное описание (минимум 600 символов), начни: "{brand} {product_name} {sku} –"
-4. SEO Title (до 60 символов)
-5. Meta Description (130-150 символов), заканчивается "Закажи онлайн!"
-6. Теги: {brand}"""
-            
-            logger.info(f"🤖 [GPT-4o-mini] Генерация SEO для: {brand} {product_name}")
-            
-            client = openai.OpenAI(api_key=self.openai_api_key)
-            
-            # Используем GPT-4o-mini
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "Ты SEO-копирайтер"},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            
-            result_text = response.choices[0].message.content.strip()
-            logger.info(f"✅ [GPT-4o-mini] Ответ получен, токенов: {response.usage.total_tokens}")
-            
-            # Парсим ответ
-            lines = result_text.split('\n')
-            parsed_lines = []
-            
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                # Убираем нумерацию
-                if line and len(line) > 3:
-                    if line[0].isdigit() and line[1:3] in ['. ', ') ', ': ']:
-                        line = line[3:].strip()
-                    elif line[:2].isdigit() and line[2:4] in ['. ', ') ', ': ']:
-                        line = line[4:].strip()
-                
-                if line:
-                    parsed_lines.append(line)
-            
-            if len(parsed_lines) < 6:
-                logger.error(f"❌ Недостаточно строк в ответе: {len(parsed_lines)}")
-                return None
-            
-            # Очистка от китайских символов (функция из fix_product_descriptions.py)
-            def clean_chinese(text: str) -> str:
-                result = []
-                for char in text:
-                    code = ord(char)
-                    if ((0x0041 <= code <= 0x005A) or  # A-Z
-                        (0x0061 <= code <= 0x007A) or  # a-z
-                        (0x0030 <= code <= 0x0039) or  # 0-9
-                        (0x0410 <= code <= 0x044F) or  # А-я
-                        code in [0x0020, 0x002D, 0x0027, 0x002E, 0x002C, 0x002F, 0x003A, 0x003B, 0x0028, 0x0029, 0x0021, 0x003F]):
-                        result.append(char)
-                return ''.join(result).strip()
-            
-            # Извлекаем поля и очищаем от иероглифов
-            title_ru = clean_chinese(parsed_lines[0])
-            short_desc = clean_chinese(parsed_lines[1])
-            full_desc = clean_chinese(parsed_lines[2])
-            seo_title = clean_chinese(parsed_lines[3])
-            meta_desc = clean_chinese(parsed_lines[4])
-            keywords = parsed_lines[5]
-            
-            # Извлекаем теги - ТОЛЬКО БРЕНД (остальное убираем)
-            # GPT возвращает слишком много лишних тегов, оставляем только бренд
-            filtered_tags = [brand]
-            
-            # Фокусное ключевое слово для Yoast SEO
-            focus_keyword = brand
-            
-            logger.info(f"✅ [GPT-4o-mini] SEO контент сгенерирован:")
-            logger.info(f"   Название: {title_ru[:60]}...")
-            logger.info(f"   Теги: {', '.join(filtered_tags)}")
-            
-            return {
-                'seo_title': title_ru,  # Используем Line 1 (Тип Бренд Модель) как основное название
-                'short_description': short_desc,
-                'description': full_desc,
-                'meta_description': meta_desc,
-                'keywords': focus_keyword,
-                'tags': filtered_tags
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ [GPT-4o-mini] Ошибка генерации SEO: {e}")
+        if not seo_data:
             return None
+            
+        # Маппинг результатов
+        return {
+            'seo_title': seo_data.get('seo_title', ''),
+            'short_description': seo_data.get('short_description', ''),
+            'description': seo_data.get('full_description', ''),
+            'meta_description': seo_data.get('meta_description', ''),
+            'keywords': seo_data.get('keywords', ''),
+            'tags': [brand]
+        }
     
     def get_product_full_info(self, spu_id: int):
         """

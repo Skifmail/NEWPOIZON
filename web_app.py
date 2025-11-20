@@ -53,7 +53,7 @@ from poizon_to_wordpress_service import (
     SyncSettings
 )
 from poizon_api_fixed import PoisonAPIClientFixed as PoisonAPIService
-from openai_service import OpenAIService  # Новый импорт из отдельного файла
+from openai_service import OpenAIService  # Новый импорт из отдельнего файла
 
 # Импорт новых улучшений
 # Fallback-импорты: если модулей нет в проекте, используем простые заглушки
@@ -103,13 +103,15 @@ DISABLE_CELERY = os.getenv('DISABLE_CELERY', 'False').lower() == 'true'
 if DISABLE_CELERY:
     CELERY_AVAILABLE = False
     batch_upload_products = None
+    batch_update_prices = None
 else:
     try:
-        from celery_tasks import batch_upload_products
+        from celery_tasks import batch_upload_products, batch_update_prices
         CELERY_AVAILABLE = True
     except ImportError:
         CELERY_AVAILABLE = False
         batch_upload_products = None
+        batch_update_prices = None
 
 # Настройка логирования (конфигурируем root logger для совместимости с Flask)
 import logging.handlers
@@ -1371,6 +1373,77 @@ def get_task_status(task_id):
         }), 500
 
 
+@app.route('/api/group-status/<group_id>', methods=['GET'])
+@login_required
+def get_group_status(group_id):
+    """
+    Получает статус группы задач Celery.
+    """
+    if not CELERY_AVAILABLE:
+        return jsonify({'success': False, 'error': 'Celery не доступен'}), 503
+    
+    try:
+        from celery.result import GroupResult
+        from celery_config import app as celery_app
+        
+        # Восстанавливаем результат группы
+        group_result = GroupResult.restore(group_id, app=celery_app)
+        
+        if not group_result:
+            return jsonify({
+                'success': False,
+                'error': 'Группа задач не найдена'
+            }), 404
+            
+        # Получаем прогресс
+        # children может быть None если backend не сохранил их, но мы делали result.save()
+        if not group_result.children:
+             return jsonify({
+                'success': True,
+                'ready': False,
+                'total': 0,
+                'completed': 0,
+                'progress': 0,
+                'message': 'Инициализация группы...'
+            })
+
+        total = len(group_result.children)
+        completed = group_result.completed_count()
+        ready = group_result.ready()
+        
+        # Собираем результаты завершенных задач
+        results = []
+        if ready:
+            # Если все готово, собираем полные результаты
+            try:
+                # Проходим по результатам
+                # group_result.results возвращает список AsyncResult или значений?
+                # Обычно это список значений если join() был вызван, но здесь это список AsyncResult?
+                # Нет, group_result.results это свойство, которое возвращает список результатов (значений) если backend позволяет
+                # Но безопаснее пройтись по children
+                for child in group_result.children:
+                    if child.ready():
+                        if child.successful():
+                            results.append(child.result)
+                        else:
+                            results.append({'status': 'error', 'message': str(child.info)})
+            except Exception as e:
+                logger.error(f"Ошибка получения результатов группы: {e}")
+        
+        return jsonify({
+            'success': True,
+            'ready': ready,
+            'total': total,
+            'completed': completed,
+            'progress': int((completed / total) * 100) if total > 0 else 0,
+            'results': results if ready else []
+        })
+        
+    except Exception as e:
+        logger.error(f"Ошибка проверки статуса группы {group_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/upload', methods=['POST'])
 @login_required
 def upload_products():
@@ -1791,6 +1864,29 @@ def update_prices_and_stock():
         )
         
         logger.info(f"Обновление цен: товаров={len(product_ids)}, курс={settings.currency_rate}, наценка={settings.markup_rubles}₽")
+        
+        # Если Celery доступен, используем его
+        if CELERY_AVAILABLE and batch_update_prices:
+            logger.info("[Celery] Запускаем фоновую задачу обновления цен")
+            
+            chord_result = batch_update_prices(
+                product_ids=product_ids,
+                settings={
+                    'currency_rate': settings_data.get('currency_rate', 13.5),
+                    'markup_rubles': settings_data.get('markup_rubles', 5000)
+                }
+            )
+            
+            return jsonify({
+                'success': True,
+                'session_id': session_id,
+                'task_id': chord_result.id,
+                'total': len(product_ids),
+                'mode': 'celery'
+            })
+
+        # Fallback: используем threading если Celery недоступен
+        logger.info("[Threading] Запускаем обновление в отдельном потоке")
         
         # Запускаем обновление в отдельном потоке
         def update_prices_thread():
