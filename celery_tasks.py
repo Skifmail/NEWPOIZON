@@ -66,10 +66,29 @@ def upload_product(
         )
         
         # Импортируем здесь чтобы избежать circular imports
-        from poizon_to_wordpress_service import (
-            WooCommerceService,
-            SyncSettings
-        )
+        try:
+            # Явно добавляем текущую директорию в путь
+            import sys
+            import os
+            current_dir = os.getcwd()
+            if current_dir not in sys.path:
+                sys.path.insert(0, current_dir)
+            
+            # Отладочный вывод
+            logger.info(f"[DEBUG] CWD: {current_dir}")
+            logger.info(f"[DEBUG] sys.path: {sys.path}")
+            logger.info(f"[DEBUG] Files in CWD: {os.listdir(current_dir)}")
+
+            from poizon_to_wordpress_service import (
+                WooCommerceService,
+                SyncSettings
+            )
+        except ImportError as e:
+            logger.error(f"[IMPORT ERROR] Failed to import service: {e}")
+            logger.error(f"[DEBUG] CWD: {os.getcwd()}")
+            logger.error(f"[DEBUG] sys.path: {sys.path}")
+            raise
+
         from poizon_api_fixed import PoisonAPIClientFixed
         from web_app import OpenAIService
         
