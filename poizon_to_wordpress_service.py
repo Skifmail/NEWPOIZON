@@ -599,12 +599,12 @@ class WooCommerceService:
             # Формируем теги - используем готовые из GPT-5 Nano или fallback
             tags = []
             
-            # Проверяем есть ли готовые теги от GPT-5 Nano
+            # Проверяем есть ли готовые теги от GPT-4o-mini
             if hasattr(product, 'tags') and product.tags:
-                # Используем теги от GPT-5 Nano (уже очищенные от мусора)
+                # Используем теги от GPT-4o-mini (только бренд)
                 for tag_name in product.tags:
                     tags.append({'name': tag_name.strip()})
-                logger.info(f"✅ Используем теги от GPT-5 Nano: {', '.join(product.tags)}")
+                logger.info(f"✅ Используем теги от GPT: {', '.join(product.tags)}")
             else:
                 # Fallback: старая логика если GPT-5 Nano не сгенерировал теги
                 keywords = getattr(product, 'keywords', '')
@@ -636,19 +636,21 @@ class WooCommerceService:
                 
                 logger.info(f"⚠️  Используем fallback теги: {', '.join([t['name'] for t in tags])}")
             
-            # Используем SEO title если есть, иначе обычный title
+            # Используем SEO title (уже очищенный от иероглифов в poizon_api_fixed.py)
+            # SEO title имеет формат "Тип Бренд Модель" (например "Ботинки CAT Colorado")
+            # Но для WordPress нужно название только на латинице
             product_name = getattr(product, 'seo_title', product.title) or product.title
-            logger.info(f"Название ДО очистки: {product_name[:100]}")
+            logger.info(f"Название из API: {product_name[:100]}")
             
-            # КРИТИЧЕСКИ ВАЖНО: Финальная очистка названия от иероглифов!
+            # КРИТИЧЕСКИ ВАЖНО: Финальная очистка названия от иероглифов и кириллицы!
             import re
             
             def clean_chinese_final(text: str) -> str:
-                """ИЗВЛЕКАЕТ только латиницу, цифры и базовые символы из текста"""
+                """ИЗВЛЕКАЕТ латиницу, кириллицу, цифры и базовые символы из текста (удаляет только иероглифы)"""
                 if not text:
                     return ""
                 
-                # НОВЫЙ ПОДХОД: ИЗВЛЕКАЕМ только нужные символы вместо удаления
+                # НОВЫЙ ПОДХОД: ИЗВЛЕКАЕМ нужные символы (латиница + кириллица), удаляем иероглифы
                 result = []
                 for char in text:
                     code = ord(char)
@@ -656,6 +658,7 @@ class WooCommerceService:
                     if (0x0041 <= code <= 0x005A or   # A-Z
                         0x0061 <= code <= 0x007A or   # a-z
                         0x0030 <= code <= 0x0039 or   # 0-9
+                        0x0410 <= code <= 0x044F or   # А-я (кириллица)
                         code == 0x0020 or              # пробел
                         code == 0x002D or              # тире -
                         code == 0x0027 or              # апостроф '
@@ -683,9 +686,9 @@ class WooCommerceService:
                 
                 return text
             
-            # Применяем очистку к названию
+            # Применяем очистку к названию (убираем иероглифы и кириллицу типа "Ботинки")
             product_name = clean_chinese_final(product_name)
-            logger.info(f"Название ПОСЛЕ очистки: '{product_name}'")
+            logger.info(f"Название после очистки: '{product_name}'")
             
             # Очищаем бренд от иероглифов (на случай если он еще содержит их)
             brand_clean = clean_chinese_final(product.brand) if product.brand else "Brand"

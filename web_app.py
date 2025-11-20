@@ -96,12 +96,19 @@ except ImportError:
         return _DummyBreaker()
 
 # Попытка импорта Celery (опционально для асинхронной обработки)
-try:
-    from celery_tasks import batch_upload_products
-    CELERY_AVAILABLE = True
-except ImportError:
+# Проверяем переменную окружения для отключения Celery
+DISABLE_CELERY = os.getenv('DISABLE_CELERY', 'False').lower() == 'true'
+
+if DISABLE_CELERY:
     CELERY_AVAILABLE = False
     batch_upload_products = None
+else:
+    try:
+        from celery_tasks import batch_upload_products
+        CELERY_AVAILABLE = True
+    except ImportError:
+        CELERY_AVAILABLE = False
+        batch_upload_products = None
 
 # Настройка логирования (конфигурируем root logger для совместимости с Flask)
 import logging.handlers

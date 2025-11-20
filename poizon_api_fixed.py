@@ -81,7 +81,7 @@ class PoisonAPIClientFixed:
         # Настройки retry
         self.max_retries = 3
         self.base_delay = 2  # базовая задержка в секундах
-        self.request_delay = 0.5  # задержка между ВСЕМИ запросами (защита от rate limit)
+        self.request_delay = 0.1  # задержка между запросами (0.1с = 10 запросов/сек)
         
         logger.info("🔌 [Poizon API] Клиент инициализирован")
         logger.info(f"⏱️  [Poizon API] Retry настройки: {self.max_retries} попыток, базовая задержка {self.base_delay}с")
@@ -335,11 +335,11 @@ class PoisonAPIClientFixed:
 
 ФОРМАТ ОТВЕТА (6 строк):
 1. {product_type} {brand} {product_name}
-2. Краткое описание (280-320 символов)
-3. Полное описание (минимум 800 символов), начни: "{brand} {product_name} {sku} –"
+2. Краткое описание (200-350 символов)
+3. Полное описание (минимум 600 символов), начни: "{brand} {product_name} {sku} –"
 4. SEO Title (до 60 символов)
-5. Meta Description (150-160 символов), заканчивается "Закажи онлайн!"
-6. Теги: {brand}; модель"""
+5. Meta Description (130-150 символов), заканчивается "Закажи онлайн!"
+6. Теги: {brand}"""
             
             logger.info(f"🤖 [GPT-4o-mini] Генерация SEO для: {brand} {product_name}")
             
@@ -392,25 +392,17 @@ class PoisonAPIClientFixed:
                         result.append(char)
                 return ''.join(result).strip()
             
-            # Извлекаем поля
+            # Извлекаем поля и очищаем от иероглифов
             title_ru = clean_chinese(parsed_lines[0])
-            short_desc = parsed_lines[1]
-            full_desc = parsed_lines[2]
+            short_desc = clean_chinese(parsed_lines[1])
+            full_desc = clean_chinese(parsed_lines[2])
             seo_title = clean_chinese(parsed_lines[3])
-            meta_desc = parsed_lines[4]
+            meta_desc = clean_chinese(parsed_lines[4])
             keywords = parsed_lines[5]
             
-            # Извлекаем теги - только бренд и модель
-            tags_list = [k.strip() for k in keywords.split(';')]
-            filtered_tags = []
-            for tag in tags_list:
-                tag_lower = tag.lower()
-                if tag_lower not in ['кроссовки', 'обувь', 'одежда', 'товар', 'sneakers', 'shoes']:
-                    filtered_tags.append(tag)
-            
-            # Добавляем бренд если его нет
-            if brand not in filtered_tags:
-                filtered_tags.insert(0, brand)
+            # Извлекаем теги - ТОЛЬКО БРЕНД (остальное убираем)
+            # GPT возвращает слишком много лишних тегов, оставляем только бренд
+            filtered_tags = [brand]
             
             # Фокусное ключевое слово для Yoast SEO
             focus_keyword = brand
@@ -817,7 +809,6 @@ class PoisonAPIClientFixed:
             if not brand_name:
                 title = detail.get('title', '')
                 # Убираем китайские служебные префиксы типа 【定制球鞋】, 【联名款】 и т.д.
-                import re
                 # Удаляем текст в 【】 скобках
                 cleaned_title = re.sub(r'【[^】]+】', '', title).strip()
                 # Берем первое слово после очистки
@@ -840,31 +831,69 @@ class PoisonAPIClientFixed:
             logger.info(f"Категория WordPress: '{wordpress_category}'")
             
             # === ШАГ 5: Генерация SEO-контента через GPT-4o-mini ===
-            # Определяем тип товара из WordPress категории
+            # Определяем тип товара из Poizon категории (более надежный источник)
             product_type = "Товар"
-            category_lower = wordpress_category.lower()
+            poizon_cat_lower = poizon_category.lower()
             
-            if 'кроссовки' in category_lower or 'sneakers' in category_lower:
+            # Проверяем китайские названия категорий
+            if '运动鞋' in poizon_cat_lower or '板鞋' in poizon_cat_lower or '休闲鞋' in poizon_cat_lower:
                 product_type = "Кроссовки"
-            elif 'куртка' in category_lower or 'jacket' in category_lower:
+            elif '户外靴' in poizon_cat_lower or '马丁靴' in poizon_cat_lower or '工装靴' in poizon_cat_lower or '靴' in poizon_cat_lower:
+                product_type = "Ботинки"
+            elif '拖鞋' in poizon_cat_lower or '凉鞋' in poizon_cat_lower:
+                product_type = "Сандалии"
+            elif '夹克' in poizon_cat_lower or '外套' in poizon_cat_lower:
                 product_type = "Куртка"
-            elif 'футболка' in category_lower or 't-shirt' in category_lower:
+            elif 'T恤' in poizon_cat_lower or '短袖' in poizon_cat_lower:
                 product_type = "Футболка"
-            elif 'толстовка' in category_lower or 'hoodie' in category_lower:
+            elif '卫衣' in poizon_cat_lower or '连帽衫' in poizon_cat_lower:
                 product_type = "Толстовка"
-            elif 'брюки' in category_lower or 'pants' in category_lower:
+            elif '裤' in poizon_cat_lower:
                 product_type = "Брюки"
-            elif 'шорты' in category_lower or 'shorts' in category_lower:
+            elif '短裤' in poizon_cat_lower:
                 product_type = "Шорты"
+            elif '帽' in poizon_cat_lower:
+                product_type = "Кепка"
+            # Fallback на WordPress категорию
+            else:
+                category_lower = wordpress_category.lower()
+                if 'кроссовки' in category_lower or 'sneakers' in category_lower:
+                    product_type = "Кроссовки"
+                elif 'ботинки' in category_lower or 'boots' in category_lower:
+                    product_type = "Ботинки"
+                elif 'куртка' in category_lower or 'jacket' in category_lower:
+                    product_type = "Куртка"
+                elif 'футболка' in category_lower or 't-shirt' in category_lower:
+                    product_type = "Футболка"
+                elif 'толстовка' in category_lower or 'hoodie' in category_lower:
+                    product_type = "Толстовка"
+                elif 'брюки' in category_lower or 'pants' in category_lower:
+                    product_type = "Брюки"
+                elif 'шорты' in category_lower or 'shorts' in category_lower:
+                    product_type = "Шорты"
             
             # Извлекаем цвет и материал из атрибутов
             color = attributes.get('Цвет', attributes.get('Color', ''))
             material = attributes.get('Материал', attributes.get('Material', ''))
             
+            # Функция для очистки от иероглифов
+            def clean_chinese(text: str) -> str:
+                result = []
+                for char in text:
+                    code = ord(char)
+                    if ((0x0041 <= code <= 0x005A) or  # A-Z
+                        (0x0061 <= code <= 0x007A) or  # a-z
+                        (0x0030 <= code <= 0x0039) or  # 0-9
+                        (0x0410 <= code <= 0x044F) or  # А-я
+                        code in [0x0020, 0x002D, 0x0027, 0x002E, 0x002C, 0x002F, 0x003A, 0x003B, 0x0028, 0x0029, 0x0021, 0x003F]):
+                        result.append(char)
+                return ''.join(result).strip()
+            
             # Извлекаем название модели из title (убираем бренд и китайские символы)
             product_title = detail.get('title', '')
             product_name = product_title.replace(brand_name, '').strip()
             product_name = re.sub(r'【[^】]+】', '', product_name).strip()  # Убираем китайские скобки
+            product_name = clean_chinese(product_name)  # Очищаем от всех иероглифов
             
             # Генерируем SEO-контент
             seo_content = self.generate_seo_content(
