@@ -1017,6 +1017,13 @@
             const markupRubles = parseFloat(document.getElementById('markupRubles').value);
             const updateSeoContent = document.getElementById('updateSeoContent').checked;
 
+            console.log('[updateSelected] Параметры:', {
+                product_ids: Array.from(selectedProductIds),
+                currencyRate,
+                markupRubles,
+                updateSeoContent
+            });
+
             // Скрываем старый прогресс бар если он был открыт
             const progressContainer = document.getElementById('progressContainer');
             progressContainer.classList.remove('active');
