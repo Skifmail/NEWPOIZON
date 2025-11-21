@@ -184,9 +184,24 @@ class OpenAIService:
                 meta_desc = clean_chinese(parsed_lines[4])
                 tags = clean_chinese(parsed_lines[5])
                 
-                # Дополнительная очистка названия
-                for bad_word in ['стиль', 'комфорт', 'мужские', 'женские', 'Style', 'Comfort']:
+                # РАДИКАЛЬНАЯ ОЧИСТКА НАЗВАНИЯ
+                # 1. Если есть артикул, обрезаем всё после него
+                if article_number and article_number in title_ru:
+                    title_ru = title_ru.split(article_number)[0] + article_number
+                
+                # 2. Принудительно ставим категорию в начало, если её там нет
+                if category and not title_ru.lower().startswith(category.lower()):
+                    # Если название начинается с бренда, добавляем категорию перед ним
+                    if title_ru.lower().startswith(brand.lower()):
+                        title_ru = f"{category} {title_ru}"
+                    else:
+                        # Иначе просто приклеиваем категорию
+                        title_ru = f"{category} {title_ru}"
+
+                # 3. Удаляем мусорные слова (на всякий случай)
+                for bad_word in ['стиль', 'комфорт', 'мужские', 'женские', 'для активных', 'спортивные', 'модные']:
                      title_ru = title_ru.replace(bad_word, '').replace(bad_word.lower(), '')
+                
                 title_ru = " ".join(title_ru.split()) # Убираем двойные пробелы
 
                 # Дополнительная очистка тегов
