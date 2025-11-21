@@ -601,6 +601,9 @@ class WooCommerceService:
             # Формируем теги - используем готовые из GPT-5 Nano или fallback
             tags = []
             
+            # Очищаем бренд от иероглифов СРАЗУ (нужен для тегов и атрибутов)
+            brand_clean = OpenAIService.clean_chinese_text(product.brand) if product.brand else "Brand"
+            
             # Проверяем есть ли готовые теги от GPT-4o-mini
             if hasattr(product, 'tags') and product.tags:
                 # Используем теги от GPT-4o-mini (только бренд)
@@ -611,9 +614,9 @@ class WooCommerceService:
                 # Fallback: старая логика если GPT-5 Nano не сгенерировал теги
                 keywords = getattr(product, 'keywords', '')
                 
-                # Добавляем только бренд
-                if product.brand:
-                    tags.append({'name': product.brand.strip()})
+                # Добавляем только очищенный бренд
+                if brand_clean:
+                    tags.append({'name': brand_clean.strip()})
                 
                 # Извлекаем название модели из первых 2-3 ключевых слов
                 if keywords:
@@ -649,8 +652,7 @@ class WooCommerceService:
             product_name = OpenAIService.clean_chinese_text(product_name)
             logger.info(f"Название после очистки: '{product_name}'")
             
-            # Очищаем бренд от иероглифов
-            brand_clean = OpenAIService.clean_chinese_text(product.brand) if product.brand else "Brand"
+            # brand_clean уже создан выше (строка 605)
             
             # Если после очистки пусто или мусор - используем очищенный бренд + артикул
             if not product_name or len(product_name.strip()) < 3 or product_name.strip() in ['-', '-(', '-(-', '(', ')']:
@@ -722,8 +724,8 @@ class WooCommerceService:
             # 1. Бренд (не для вариаций)
             brand_attr = self.ensure_attribute_exists('Бренд')
             if brand_attr:
-                # Создаем термин для бренда и получаем его slug
-                brand_term = self.create_attribute_term(brand_attr['id'], product.brand)
+                # Создаем термин для бренда и получаем его slug (используем очищенный бренд)
+                brand_term = self.create_attribute_term(brand_attr['id'], brand_clean)
                 
                 if brand_term:
                     # Для глобальных атрибутов используем название термина (не slug!)
@@ -744,12 +746,12 @@ class WooCommerceService:
                     
                     logger.info(f"  Бренд привязан: '{brand_term['name']}' (ID: {brand_term['id']})")
                 else:
-                    logger.warning(f"  Не удалось создать термин для бренда '{product.brand}', используем название")
+                    logger.warning(f"  Не удалось создать термин для бренда '{brand_clean}', используем название")
                     data['attributes'].append({
                         'id': brand_attr['id'],
                         'visible': True,
                         'variation': False,
-                        'options': [product.brand]
+                        'options': [brand_clean]
                     })
             else:
                 logger.warning("  Не удалось создать атрибут Бренд, используем локальный")
@@ -757,7 +759,7 @@ class WooCommerceService:
                     'name': 'Бренд',
                     'visible': True,
                     'variation': False,
-                    'options': [product.brand]
+                    'options': [brand_clean]
                 })
             
             # 2. Цвет (ДЛЯ ВАРИАЦИЙ, СНАЧАЛА!)
