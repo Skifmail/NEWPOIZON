@@ -774,12 +774,12 @@ class PoisonAPIClientFixed:
             product_name = re.sub(r'【[^】]+】', '', product_name).strip()  # Убираем китайские скобки
             product_name = self.openai_service.clean_chinese_text(product_name)  # Очищаем через централизованную функцию
             
-            # Формируем атрибуты для OpenAI
-            attributes = []
+            # Формируем атрибуты для OpenAI (используем другое имя чтобы не перезаписать product.attributes)
+            openai_attributes = []
             if color:
-                attributes.append({'name': 'Color', 'value': color})
+                openai_attributes.append({'name': 'Color', 'value': color})
             if material:
-                attributes.append({'name': 'Material', 'value': material})
+                openai_attributes.append({'name': 'Material', 'value': material})
             
             # Генерируем SEO-контент напрямую через OpenAI Service
             seo_content = self.openai_service.translate_and_generate_seo(
@@ -787,7 +787,7 @@ class PoisonAPIClientFixed:
                 description="",
                 category=product_type,
                 brand=brand_name,
-                attributes=attributes,
+                attributes=openai_attributes,
                 article_number=detail.get('articleNumber', '')
             )
             
