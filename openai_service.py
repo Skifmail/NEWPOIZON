@@ -69,6 +69,9 @@ class OpenAIService:
                     elif 'material' in name or 'материал' in name:
                         material = value
 
+        # Формируем целевое название (Категория + Бренд + Артикул)
+        target_title = f"{category} {brand} {article_number}" if article_number else f"{category} {brand} {title}"
+
         # Формируем промпт точно как в poizon_api_fixed.py
         prompt = f"""Создай SEO-контент для товара.
 
@@ -80,12 +83,12 @@ class OpenAIService:
 - Материал: {material}
 
 ФОРМАТ ОТВЕТА (6 строк):
-1. {category} {brand} {title}
+1. {target_title} (Строго в формате: Категория Бренд Артикул, без лишних слов)
 2. Краткое описание (200-350 символов)
 3. Полное описание (минимум 600 символов), начни: "{brand} {title} {article_number} –"
 4. SEO Title (до 60 символов)
 5. Meta Description (130-150 символов), заканчивается "Закажи онлайн!"
-6. Теги: {brand}"""
+6. Список тегов через точку с запятой (без слова "Теги:"). Пример: {brand}; {category}; обувь"""
 
         try:
             headers = {
@@ -171,6 +174,11 @@ class OpenAIService:
                 seo_title = clean_chinese(parsed_lines[3])
                 meta_desc = clean_chinese(parsed_lines[4])
                 tags = clean_chinese(parsed_lines[5])
+                
+                # Дополнительная очистка тегов
+                if tags.lower().startswith('теги:') or tags.lower().startswith('tags:'):
+                    tags = tags.split(':', 1)[1].strip()
+                tags = tags.replace(',', ';')
                 
                 return {
                     'title_ru': title_ru,
