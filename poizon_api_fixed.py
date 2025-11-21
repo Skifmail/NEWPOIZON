@@ -800,6 +800,7 @@ class PoisonAPIClientFixed:
                 meta_description = seo_content.get('meta_description', '')
                 keywords = seo_content.get('keywords', '')
                 tags = [brand_name]
+                logger.info(f"✅ OpenAI вернул title_ru: '{title_ru}', seo_title: '{seo_title[:50] if seo_title else 'пусто'}'...")
             else:
                 # Fallback: базовый контент если GPT-4o-mini не сработал
                 title_ru = f"{product_type} {brand_name} {detail.get('articleNumber', '')}"
