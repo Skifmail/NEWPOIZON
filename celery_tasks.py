@@ -387,32 +387,76 @@ def update_product_price(
             except Exception as e:
                 return {'status': 'error', 'message': f'Ошибка поиска: {str(e)}'}
 
-        # Шаг 2: Обновляем цены
-        self.update_state(
-            state='PROGRESS',
-            meta={'current': 60, 'total': 100, 'status': 'Обновление цен...'}
-        )
+        # Шаг 2: Проверяем режим обновления
+        update_content = settings.get('update_content', False)
         
-        updated = woocommerce.update_product_prices_only(
-            wc_product_id,
-            spu_id,
-            settings.get('currency_rate', 13.5),
-            settings.get('markup_rubles', 5000),
-            poizon
-        )
-        
-        if updated < 0:
-            return {'status': 'error', 'message': 'Не удалось получить цены'}
-        elif updated == 0:
-            return {'status': 'warning', 'message': 'Нет совпадающих вариаций'}
+        if update_content:
+            # ПОЛНОЕ обновление с контентом
+            self.update_state(
+                state='PROGRESS',
+                meta={'current': 60, 'total': 100, 'status': 'Генерация SEO через OpenAI...'}
+            )
             
-        return {
-            'status': 'completed',
-            'product_id': wc_product_id,
-            'product_name': product_name,
-            'variations_updated': updated,
-            'message': f'Обновлено {updated} вариаций'
-        }
+            # Получаем полную информацию о товаре (с SEO)
+            try:
+                product = poizon_cb.call(poizon.get_product_full_info, spu_id)
+            except CircuitBreakerError:
+                return {'status': 'error', 'message': 'Poizon API недоступен'}
+            
+            if not product:
+                return {'status': 'error', 'message': 'Не удалось загрузить товар'}
+            
+            self.update_state(
+                state='PROGRESS',
+                meta={'current': 80, 'total': 100, 'status': 'Обновление контента...'}
+            )
+            
+            # Создаем настройки
+            from poizon_to_wordpress_service import SyncSettings
+            sync_settings = SyncSettings(
+                currency_rate=settings.get('currency_rate', 13.5),
+                markup_rubles=settings.get('markup_rubles', 5000)
+            )
+            
+            # Обновляем товар с SEO
+            success = woocommerce.update_product_with_seo(wc_product_id, product, sync_settings)
+            
+            if success:
+                return {
+                    'status': 'completed',
+                    'product_id': wc_product_id,
+                    'product_name': product_name,
+                    'message': 'Обновлен SEO контент + цены и остатки'
+                }
+            else:
+                return {'status': 'error', 'message': 'Ошибка обновления контента'}
+        else:
+            # БЫСТРОЕ обновление: только цены
+            self.update_state(
+                state='PROGRESS',
+                meta={'current': 60, 'total': 100, 'status': 'Обновление цен...'}
+            )
+            
+            updated = woocommerce.update_product_prices_only(
+                wc_product_id,
+                spu_id,
+                settings.get('currency_rate', 13.5),
+                settings.get('markup_rubles', 5000),
+                poizon
+            )
+            
+            if updated < 0:
+                return {'status': 'error', 'message': 'Не удалось получить цены'}
+            elif updated == 0:
+                return {'status': 'warning', 'message': 'Нет совпадающих вариаций'}
+                
+            return {
+                'status': 'completed',
+                'product_id': wc_product_id,
+                'product_name': product_name,
+                'variations_updated': updated,
+                'message': f'Обновлено {updated} вариаций'
+            }
         
     except Exception as e:
         logger.error(f"Ошибка обновления товара {wc_product_id}: {e}")

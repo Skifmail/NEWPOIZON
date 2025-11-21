@@ -1208,6 +1208,96 @@ class WooCommerceService:
             logger.error(f"[ERROR] Ошибка обновления вариаций товара {product_id}: {e}")
             return 0
     
+    def update_product_with_seo(self, product_id: int, product: PoisonProduct, settings: SyncSettings) -> bool:
+        """
+        Обновляет товар с полным SEO контентом (описание, теги, мета) + цены и остатки.
+        
+        Args:
+            product_id: ID товара в WordPress
+            product: Объект товара из Poizon с SEO полями
+            settings: Настройки синхронизации
+            
+        Returns:
+            True если успешно, False при ошибке
+        """
+        try:
+            url = f"{self.url}/wp-json/wc/v3/products/{product_id}"
+            
+            # Формируем SEO теги
+            tags = []
+            if hasattr(product, 'tags') and product.tags:
+                for tag_name in product.tags:
+                    tags.append({'name': tag_name.strip()})
+            
+            # Формируем meta_data
+            meta_data = [
+                {'key': '_poizon_spu_id', 'value': str(product.spu_id)},
+            ]
+            
+            if hasattr(product, 'meta_description') and product.meta_description:
+                meta_data.append({'key': '_yoast_wpseo_metadesc', 'value': product.meta_description})
+            
+            if hasattr(product, 'keywords') and product.keywords:
+                meta_data.append({'key': '_yoast_wpseo_focuskw', 'value': product.keywords})
+            
+            # Используем SEO title
+            product_name = getattr(product, 'seo_title', product.title) or product.title
+            
+            # Очистка названия от иероглифов
+            import re
+            def clean_chinese_final(text: str) -> str:
+                if not text:
+                    return ""
+                result = []
+                for char in text:
+                    code = ord(char)
+                    if (0x0041 <= code <= 0x005A or 0x0061 <= code <= 0x007A or 
+                        0x0030 <= code <= 0x0039 or 0x0410 <= code <= 0x044F or 
+                        code in [0x0020, 0x002D, 0x0027, 0x002E, 0x002C]):
+                        result.append(char)
+                    elif 0xFF21 <= code <= 0xFF3A:
+                        result.append(chr(code - 0xFEE0))
+                    elif 0xFF41 <= code <= 0xFF5A:
+                        result.append(chr(code - 0xFEE0))
+                    elif 0xFF10 <= code <= 0xFF19:
+                        result.append(chr(code - 0xFEE0))
+                text = ''.join(result)
+                text = re.sub(r'\s+', ' ', text).strip()
+                return text.strip(' -.,')
+            
+            product_name = clean_chinese_final(product_name)
+            brand_clean = clean_chinese_final(product.brand) if product.brand else "Brand"
+            
+            if not product_name or len(product_name.strip()) < 3:
+                product_name = f"{brand_clean} {product.article_number}".strip()
+            elif brand_clean.upper() not in product_name.upper():
+                product_name = f"{brand_clean} {product_name}"
+            
+            # Данные для обновления
+            update_data = {
+                'name': product_name,
+                'description': product.description,
+                'short_description': getattr(product, 'short_description', ''),
+                'tags': tags,
+                'meta_data': meta_data
+            }
+            
+            # Обновляем товар
+            response = requests.put(url, auth=self.auth, json=update_data, verify=False, timeout=60)
+            response.raise_for_status()
+            
+            logger.info(f"[OK] Обновлен SEO контент товара ID {product_id}")
+            
+            # Обновляем цены и остатки вариаций
+            updated_variations = self.update_product_variations(product_id, product, settings)
+            logger.info(f"[OK] Обновлено {updated_variations} вариаций")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"[ERROR] Ошибка обновления товара с SEO {product_id}: {e}")
+            return False
+    
     def update_product_prices_only(self, product_id: int, spu_id: int, currency_rate: float, markup_rubles: float, poizon_client) -> int:
         """
         Обновляет ТОЛЬКО цены и остатки товара без полной загрузки данных.

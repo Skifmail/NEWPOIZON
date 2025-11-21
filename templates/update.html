@@ -574,6 +574,19 @@
                     </div>
                 </div>
                 
+                <!-- Чекбокс для обновления SEO контента -->
+                <div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; border: 2px solid #5568d3;">
+                    <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; color: white; font-size: 16px; font-weight: 600;">
+                        <input type="checkbox" id="updateSeoContent" style="width: 22px; height: 22px; cursor: pointer; accent-color: #ffd700;">
+                        <span style="flex: 1;">
+                            ✨ Обновить контент через OpenAI (SEO, описание, теги, мета)
+                        </span>
+                    </label>
+                    <small style="display: block; margin-top: 8px; color: rgba(255,255,255,0.85); margin-left: 34px; line-height: 1.4;">
+                        💡 При включении этой опции товары будут обновлены полностью: цены, остатки + регенерация описаний, тегов и SEO через OpenAI (как при загрузке новых товаров)
+                    </small>
+                </div>
+                
                 <div style="margin-top: 15px; padding: 10px; background: #e3f2fd; border-radius: 8px; border-left: 4px solid #2196f3;">
                     <small style="color: #1565c0;">
                         📊 Товары отсортированы от самых старых к новым по дате обновления
@@ -1002,6 +1015,7 @@
 
             const currencyRate = parseFloat(document.getElementById('currencyRate').value);
             const markupRubles = parseFloat(document.getElementById('markupRubles').value);
+            const updateSeoContent = document.getElementById('updateSeoContent').checked;
 
             // Скрываем старый прогресс бар если он был открыт
             const progressContainer = document.getElementById('progressContainer');
@@ -1017,7 +1031,8 @@
                         product_ids: Array.from(selectedProductIds),
                         settings: {
                             currency_rate: currencyRate,
-                            markup_rubles: markupRubles
+                            markup_rubles: markupRubles,
+                            update_content: updateSeoContent
                         }
                     })
                 });

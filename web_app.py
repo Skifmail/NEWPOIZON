@@ -1889,7 +1889,7 @@ def update_prices_and_stock():
             markup_rubles=settings_data.get('markup_rubles', 5000)
         )
         
-        logger.info(f"Обновление цен: товаров={len(product_ids)}, курс={settings.currency_rate}, наценка={settings.markup_rubles}₽")
+        logger.info(f"Обновление {'с контентом' if update_content else 'цен'}: товаров={len(product_ids)}, курс={settings.currency_rate}, наценка={settings.markup_rubles}₽")
         
         # Если Celery доступен, используем его
         if CELERY_AVAILABLE and batch_update_prices:
@@ -1899,7 +1899,8 @@ def update_prices_and_stock():
                 product_ids=product_ids,
                 settings={
                     'currency_rate': settings_data.get('currency_rate', 13.5),
-                    'markup_rubles': settings_data.get('markup_rubles', 5000)
+                    'markup_rubles': settings_data.get('markup_rubles', 5000),
+                    'update_content': update_content
                 }
             )
             
@@ -2014,69 +2015,123 @@ def update_prices_and_stock():
                         else:
                             logger.info(f"  Используем сохраненный spuId: {spu_id} (надежно!)")
                         
-                        # ОПТИМИЗАЦИЯ: Обновляем только цены и остатки (без полной загрузки товара!)
-                        progress_queues[session_id].put({
-                            'type': 'status_update',
-                            'message': f'  → Загрузка цен из Poizon (SPU: {spu_id})...'
-                        })
-                        
-                        # Используем быстрый метод - только цены и остатки, без изображений/переводов/категорий
-                        updated = woocommerce_client.update_product_prices_only(
-                            wc_product_id,
-                            spu_id,
-                            settings.currency_rate,
-                            settings.markup_rubles,
-                            poizon_client  # Передаем клиент Poizon
-                        )
-                        
-                        if updated < 0:  # Ошибка получения цен
-                            progress_queues[session_id].put({
-                                'type': 'product_done',
-                                'current': idx,
-                                'status': 'error',
-                                'message': f'[{idx}/{len(product_ids)}] Не удалось получить цены'
-                            })
-                            results.append({'product_id': wc_product_id, 'status': 'error', 'message': 'Не удалось получить цены'})
-                            error_count += 1
-                            continue
-                        
-                        # Обновляем вариации
-                        progress_queues[session_id].put({
-                            'type': 'status_update',
-                            'message': f'  → Обновление цен и остатков в WordPress...'
-                        })
-                        
-                        if updated > 0:
+                        # Проверяем режим обновления
+                        if update_content:
+                            # ПОЛНОЕ обновление с контентом через OpenAI
                             progress_queues[session_id].put({
                                 'type': 'status_update',
-                                'message': f'  → Успешно обновлено {updated} вариаций'
+                                'message': f'  → Загрузка полных данных из Poizon + генерация SEO через OpenAI...'
                             })
                             
+                            # Получаем полную информацию о товаре (включает генерацию SEO через OpenAI)
+                            product = poizon_client.get_product_full_info(spu_id)
+                            
+                            if not product:
+                                progress_queues[session_id].put({
+                                    'type': 'product_done',
+                                    'current': idx,
+                                    'status': 'error',
+                                    'message': f'[{idx}/{len(product_ids)}] Не удалось загрузить товар из Poizon'
+                                })
+                                results.append({'product_id': wc_product_id, 'status': 'error', 'message': 'Не удалось загрузить товар'})
+                                error_count += 1
+                                continue
+                            
                             progress_queues[session_id].put({
-                                'type': 'product_done',
-                                'current': idx,
-                                'status': 'completed',
-                                'message': f'[{idx}/{len(product_ids)}] {product_name}: обновлено {updated} вариаций'
+                                'type': 'status_update',
+                                'message': f'  → Обновление товара с SEO контентом в WordPress...'
                             })
-                            results.append({
-                                'product_id': wc_product_id,
-                                'product_name': product_name,
-                                'status': 'completed',
-                                'message': f'Обновлено вариаций: {updated}'
-                            })
-                            updated_count += 1
+                            
+                            # Обновляем товар с SEO контентом
+                            success = woocommerce_client.update_product_with_seo(wc_product_id, product, settings)
+                            
+                            if success:
+                                progress_queues[session_id].put({
+                                    'type': 'product_done',
+                                    'current': idx,
+                                    'status': 'completed',
+                                    'message': f'[{idx}/{len(product_ids)}] {product_name}: обновлен контент + цены'
+                                })
+                                results.append({
+                                    'product_id': wc_product_id,
+                                    'product_name': product_name,
+                                    'status': 'completed',
+                                    'message': 'Обновлен SEO контент + цены и остатки'
+                                })
+                                updated_count += 1
+                            else:
+                                progress_queues[session_id].put({
+                                    'type': 'product_done',
+                                    'current': idx,
+                                    'status': 'error',
+                                    'message': f'[{idx}/{len(product_ids)}] Ошибка обновления контента'
+                                })
+                                results.append({'product_id': wc_product_id, 'status': 'error', 'message': 'Ошибка обновления контента'})
+                                error_count += 1
                         else:
+                            # БЫСТРОЕ обновление: только цены и остатки
                             progress_queues[session_id].put({
-                                'type': 'product_done',
-                                'current': idx,
-                                'status': 'warning',
-                                'message': f'[{idx}/{len(product_ids)}] {product_name}: SKU не совпадают'
+                                'type': 'status_update',
+                                'message': f'  → Загрузка цен из Poizon (SPU: {spu_id})...'
                             })
-                            results.append({
-                                'product_id': wc_product_id,
-                                'status': 'warning',
-                                'message': 'Нет совпадающих вариаций'
+                            
+                            # Используем быстрый метод - только цены и остатки, без изображений/переводов/категорий
+                            updated = woocommerce_client.update_product_prices_only(
+                                wc_product_id,
+                                spu_id,
+                                settings.currency_rate,
+                                settings.markup_rubles,
+                                poizon_client  # Передаем клиент Poizon
+                            )
+                            
+                            if updated < 0:  # Ошибка получения цен
+                                progress_queues[session_id].put({
+                                    'type': 'product_done',
+                                    'current': idx,
+                                    'status': 'error',
+                                    'message': f'[{idx}/{len(product_ids)}] Не удалось получить цены'
+                                })
+                                results.append({'product_id': wc_product_id, 'status': 'error', 'message': 'Не удалось получить цены'})
+                                error_count += 1
+                                continue
+                            
+                            # Обновляем вариации
+                            progress_queues[session_id].put({
+                                'type': 'status_update',
+                                'message': f'  → Обновление цен и остатков в WordPress...'
                             })
+                            
+                            if updated > 0:
+                                progress_queues[session_id].put({
+                                    'type': 'status_update',
+                                    'message': f'  → Успешно обновлено {updated} вариаций'
+                                })
+                                
+                                progress_queues[session_id].put({
+                                    'type': 'product_done',
+                                    'current': idx,
+                                    'status': 'completed',
+                                    'message': f'[{idx}/{len(product_ids)}] {product_name}: обновлено {updated} вариаций'
+                                })
+                                results.append({
+                                    'product_id': wc_product_id,
+                                    'product_name': product_name,
+                                    'status': 'completed',
+                                    'message': f'Обновлено вариаций: {updated}'
+                                })
+                                updated_count += 1
+                            else:
+                                progress_queues[session_id].put({
+                                    'type': 'product_done',
+                                    'current': idx,
+                                    'status': 'warning',
+                                    'message': f'[{idx}/{len(product_ids)}] {product_name}: SKU не совпадают'
+                                })
+                                results.append({
+                                    'product_id': wc_product_id,
+                                    'status': 'warning',
+                                    'message': 'Нет совпадающих вариаций'
+                                })
                         
                         # Пауза для соблюдения rate limits
                         time.sleep(2)
