@@ -30,15 +30,24 @@ class OpenAIService:
         self.api_url = f"{base_url}/chat/completions"
         
         # Настройка прокси для OpenAI (для обхода блокировок)
-        proxy_host = os.getenv('OPENAI_PROXY_HOST')
-        proxy_port = os.getenv('OPENAI_PROXY_PORT', '50100')  # HTTP/HTTPS порт
-        proxy_login = os.getenv('OPENAI_PROXY_LOGIN')
-        proxy_password = os.getenv('OPENAI_PROXY_PASSWORD')
+        # Сначала пробуем взять полную строку прокси
+        self.proxy = os.getenv('OPENAI_PROXY')
         
-        if proxy_host and proxy_login and proxy_password:
-            # Формат: http://login:password@host:port
-            self.proxy = f"http://{proxy_login}:{proxy_password}@{proxy_host}:{proxy_port}"
-            logger.info(f"[OpenAI] Используется прокси: {proxy_login}@{proxy_host}:{proxy_port}")
+        # Если полной строки нет, пробуем собрать из компонентов
+        if not self.proxy:
+            proxy_host = os.getenv('OPENAI_PROXY_HOST')
+            proxy_port = os.getenv('OPENAI_PROXY_PORT', '50100')  # HTTP/HTTPS порт
+            proxy_login = os.getenv('OPENAI_PROXY_LOGIN')
+            proxy_password = os.getenv('OPENAI_PROXY_PASSWORD')
+            
+            if proxy_host and proxy_login and proxy_password:
+                # Формат: http://login:password@host:port
+                self.proxy = f"http://{proxy_login}:{proxy_password}@{proxy_host}:{proxy_port}"
+        
+        if self.proxy:
+            # Логируем факт использования прокси (скрывая пароль)
+            safe_proxy = self.proxy.split('@')[-1] if '@' in self.proxy else '***'
+            logger.info(f"[OpenAI] Используется прокси: {safe_proxy}")
         else:
             self.proxy = None
         
