@@ -755,42 +755,54 @@ class PoisonAPIClientFixed:
             product_type = "Товар"
             poizon_cat_lower = poizon_category.lower()
             
-            # Проверяем китайские названия категорий
-            if '运动鞋' in poizon_cat_lower or '板鞋' in poizon_cat_lower or '休闲鞋' in poizon_cat_lower:
+            # Проверяем китайские названия категорий (расширенная логика)
+            if '运动鞋' in poizon_cat_lower or '板鞋' in poizon_cat_lower or '休闲鞋' in poizon_cat_lower or 'sneakers' in poizon_cat_lower:
                 product_type = "Кроссовки"
-            elif '户外靴' in poizon_cat_lower or '马丁靴' in poizon_cat_lower or '工装靴' in poizon_cat_lower or '靴' in poizon_cat_lower:
+            elif '户外靴' in poizon_cat_lower or '马丁靴' in poizon_cat_lower or '工装靴' in poizon_cat_lower or '靴' in poizon_cat_lower or 'boots' in poizon_cat_lower:
                 product_type = "Ботинки"
-            elif '拖鞋' in poizon_cat_lower or '凉鞋' in poizon_cat_lower:
+            elif '拖鞋' in poizon_cat_lower or '凉鞋' in poizon_cat_lower or 'sandals' in poizon_cat_lower:
                 product_type = "Сандалии"
-            elif '夹克' in poizon_cat_lower or '外套' in poizon_cat_lower:
+            # ВАЖНО: куртки и верхняя одежда идут ДО общей проверки на "одежда"
+            elif '夹克' in poizon_cat_lower or '外套' in poizon_cat_lower or '羽绒服' in poizon_cat_lower or '棉服' in poizon_cat_lower or 'jacket' in poizon_cat_lower or 'coat' in poizon_cat_lower or 'parka' in poizon_cat_lower:
                 product_type = "Куртка"
-            elif 'T恤' in poizon_cat_lower or '短袖' in poizon_cat_lower:
+            elif 'T恤' in poizon_cat_lower or '短袖' in poizon_cat_lower or 't-shirt' in poizon_cat_lower or 'tee' in poizon_cat_lower:
                 product_type = "Футболка"
-            elif '卫衣' in poizon_cat_lower or '连帽衫' in poizon_cat_lower:
+            elif '卫衣' in poizon_cat_lower or '连帽衫' in poizon_cat_lower or 'hoodie' in poizon_cat_lower or 'sweatshirt' in poizon_cat_lower:
                 product_type = "Толстовка"
-            elif '裤' in poizon_cat_lower:
+            elif '裤' in poizon_cat_lower and '短裤' not in poizon_cat_lower:
                 product_type = "Брюки"
-            elif '短裤' in poizon_cat_lower:
+            elif '短裤' in poizon_cat_lower or 'shorts' in poizon_cat_lower:
                 product_type = "Шорты"
-            elif '帽' in poizon_cat_lower:
+            elif '帽' in poizon_cat_lower or 'cap' in poizon_cat_lower or 'hat' in poizon_cat_lower:
                 product_type = "Кепка"
-            # Fallback на WordPress категорию
+            # Fallback на WordPress категорию (проверяем обе категории)
             else:
-                category_lower = wordpress_category.lower()
-                if 'кроссовки' in category_lower or 'sneakers' in category_lower:
+                combined_category = f"{wordpress_category} {poizon_category}".lower()
+                if 'кроссовки' in combined_category or 'sneakers' in combined_category or 'trainers' in combined_category:
                     product_type = "Кроссовки"
-                elif 'ботинки' in category_lower or 'boots' in category_lower:
+                elif 'ботинки' in combined_category or 'boots' in combined_category or 'сапоги' in combined_category:
                     product_type = "Ботинки"
-                elif 'куртка' in category_lower or 'jacket' in category_lower:
+                elif 'куртка' in combined_category or 'jacket' in combined_category or 'пуховик' in combined_category or 'парка' in combined_category or 'coat' in combined_category:
                     product_type = "Куртка"
-                elif 'футболка' in category_lower or 't-shirt' in category_lower:
+                elif 'футболка' in combined_category or 't-shirt' in combined_category or 'майка' in combined_category:
                     product_type = "Футболка"
-                elif 'толстовка' in category_lower or 'hoodie' in category_lower:
+                elif 'толстовка' in combined_category or 'hoodie' in combined_category or 'свитшот' in combined_category:
                     product_type = "Толстовка"
-                elif 'брюки' in category_lower or 'pants' in category_lower:
+                elif 'брюки' in combined_category or 'pants' in combined_category or 'джинсы' in combined_category:
                     product_type = "Брюки"
-                elif 'шорты' in category_lower or 'shorts' in category_lower:
+                elif 'шорты' in combined_category or 'shorts' in combined_category:
                     product_type = "Шорты"
+                elif 'обувь' in combined_category or 'shoes' in combined_category or 'footwear' in combined_category:
+                    # Если просто "обувь" без уточнения - определяем по бренду
+                    brand_lower = brand_name.lower()
+                    if brand_lower in ['nike', 'adidas', 'puma', 'reebok', 'new balance', 'asics', 'converse', 'vans']:
+                        product_type = "Кроссовки"
+                    elif brand_lower in ['timberland', 'dr. martens', 'caterpillar', 'ugg']:
+                        product_type = "Ботинки"
+                    else:
+                        product_type = "Обувь"
+            
+            logger.info(f"Определен тип товара: '{product_type}' (Poizon: {poizon_category}, WP: {wordpress_category})")
             
             # Извлекаем цвет и материал из атрибутов
             color = attributes.get('Цвет', attributes.get('Color', ''))
