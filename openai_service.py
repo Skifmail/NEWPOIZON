@@ -184,23 +184,31 @@ class OpenAIService:
                 meta_desc = clean_chinese(parsed_lines[4])
                 tags = clean_chinese(parsed_lines[5])
                 
-                # РАДИКАЛЬНАЯ ОЧИСТКА НАЗВАНИЯ
-                # 1. Если есть артикул, обрезаем всё после него
+                # ЖЕСТКАЯ ОЧИСТКА НАЗВАНИЯ
+                # 1. Если есть артикул - находим его позицию и обрезаем ВСЁ после него
                 if article_number and article_number in title_ru:
-                    title_ru = title_ru.split(article_number)[0] + article_number
+                    # Находим позицию артикула
+                    article_pos = title_ru.find(article_number)
+                    # Обрезаем строку: всё до конца артикула
+                    title_ru = title_ru[:article_pos + len(article_number)]
                 
-                # 2. Принудительно ставим категорию в начало, если её там нет
+                # 2. Если артикула нет, берём только первые 3-4 слова (Категория Бренд Модель)
+                elif ' ' in title_ru:
+                    words = title_ru.split()
+                    if len(words) > 4:
+                        title_ru = ' '.join(words[:4])
+                
+                # 3. Принудительно добавляем категорию в начало, если её нет
                 if category and not title_ru.lower().startswith(category.lower()):
-                    # Если название начинается с бренда, добавляем категорию перед ним
-                    if title_ru.lower().startswith(brand.lower()):
-                        title_ru = f"{category} {title_ru}"
-                    else:
-                        # Иначе просто приклеиваем категорию
-                        title_ru = f"{category} {title_ru}"
-
-                # 3. Удаляем мусорные слова (на всякий случай)
-                for bad_word in ['стиль', 'комфорт', 'мужские', 'женские', 'для активных', 'спортивные', 'модные']:
-                     title_ru = title_ru.replace(bad_word, '').replace(bad_word.lower(), '')
+                    title_ru = f"{category} {title_ru}"
+                
+                # 4. Удаляем повторяющуюся категорию (если OpenAI её продублировал)
+                if category:
+                    category_lower = category.lower()
+                    words = title_ru.split()
+                    # Если категория встречается 2 раза подряд - удаляем дубль
+                    if len(words) >= 2 and words[0].lower() == category_lower and words[1].lower() == category_lower:
+                        title_ru = ' '.join(words[1:])
                 
                 title_ru = " ".join(title_ru.split()) # Убираем двойные пробелы
 
