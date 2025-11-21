@@ -21,7 +21,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
-import time
 
 # Импортируем рабочий клиент Poizon API
 from poizon_api_fixed import PoisonAPIClientFixed
@@ -1426,16 +1425,63 @@ class PoisonToWordPressService:
         
         return filtered
     
+    def _process_single_product(self, idx: int, total_count: int, product_basic: Dict, update_existing: bool) -> str:
+        """
+        Обрабатывает один товар в отдельном потоке.
+        
+        Returns:
+            Статус обработки: 'created', 'updated', 'skipped', 'error'
+        """
+        spu_id = product_basic.get('spuId')
+        
+        if not spu_id:
+            logger.warning(f"Товар {idx}: нет spuId, пропускаем")
+            return 'skipped'
+        
+        try:
+            logger.info(f"[{idx}/{total_count}] 🚀 Начало обработки spuId {spu_id}")
+            
+            # Получаем полную информацию о товаре
+            product = self.poizon.get_product_full_info(spu_id)
+            
+            if not product:
+                logger.warning(f"  ❌ Не удалось загрузить товар {spu_id}")
+                return 'error'
+            
+            # Проверяем существует ли товар
+            existing_id = self.woocommerce.product_exists(product.sku)
+            
+            if existing_id:
+                if update_existing:
+                    logger.info(f"  🔄 Товар существует (ID {existing_id}), обновляем...")
+                    self.woocommerce.update_product_variations(existing_id, product, self.settings)
+                    return 'updated'
+                else:
+                    logger.info(f"  ⏭️ Товар существует (ID {existing_id}), пропускаем")
+                    return 'skipped'
+            else:
+                logger.info(f"  ✨ Создаем новый товар...")
+                new_id = self.woocommerce.create_product(product, self.settings)
+                
+                if new_id:
+                    return 'created'
+                else:
+                    return 'error'
+            
+        except Exception as e:
+            logger.error(f"  ❌ [ERROR] Ошибка обработки товара {spu_id}: {e}")
+            return 'error'
+
     def sync_all_products(self, limit: int = 100, update_existing: bool = True):
         """
-        Синхронизирует все товары из Poizon в WordPress.
+        Синхронизирует все товары из Poizon в WordPress (МНОГОПОТОЧНО).
         
         Args:
             limit: Максимальное количество товаров для синхронизации
             update_existing: Обновлять ли существующие товары
         """
         logger.info("="*70)
-        logger.info("НАЧАЛО СИНХРОНИЗАЦИИ POIZON → WORDPRESS")
+        logger.info("НАЧАЛО СИНХРОНИЗАЦИИ POIZON → WORDPRESS (PARALLEL)")
         logger.info("="*70)
         
         # Получаем товары из Poizon
@@ -1447,63 +1493,41 @@ class PoisonToWordPressService:
         
         # Применяем фильтры
         products_list = self.filter_products(products_list)
+        total_products = len(products_list)
         
         created_count = 0
         updated_count = 0
         skipped_count = 0
         error_count = 0
         
-        for idx, product_basic in enumerate(products_list, 1):
-            spu_id = product_basic.get('spuId')
+        logger.info(f"Запуск обработки {total_products} товаров в 5 потоков...")
+        
+        # Используем ThreadPoolExecutor для параллельной обработки
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            # Создаем задачи
+            future_to_product = {
+                executor.submit(self._process_single_product, idx, total_products, product, update_existing): product 
+                for idx, product in enumerate(products_list, 1)
+            }
             
-            if not spu_id:
-                logger.warning(f"Товар {idx}: нет spuId, пропускаем")
-                skipped_count += 1
-                continue
-            
-            try:
-                logger.info(f"\n[{idx}/{len(products_list)}] Обработка товара spuId {spu_id}")
+            # Обрабатываем результаты по мере завершения
+            for future in as_completed(future_to_product):
+                result = future.result()
                 
-                # Получаем полную информацию о товаре
-                product = self.poizon.get_product_full_info(spu_id)
-                
-                if not product:
-                    logger.warning(f"  Не удалось загрузить товар {spu_id}")
-                    error_count += 1
-                    continue
-                
-                # Проверяем существует ли товар
-                existing_id = self.woocommerce.product_exists(product.sku)
-                
-                if existing_id:
-                    if update_existing:
-                        logger.info(f"  Товар существует (ID {existing_id}), обновляем...")
-                        self.woocommerce.update_product_variations(existing_id, product, self.settings)
-                        updated_count += 1
-                    else:
-                        logger.info(f"  Товар существует (ID {existing_id}), пропускаем")
-                        skipped_count += 1
+                if result == 'created':
+                    created_count += 1
+                elif result == 'updated':
+                    updated_count += 1
+                elif result == 'skipped':
+                    skipped_count += 1
                 else:
-                    logger.info(f"  Создаем новый товар...")
-                    new_id = self.woocommerce.create_product(product, self.settings)
-                    
-                    if new_id:
-                        created_count += 1
-                    else:
-                        error_count += 1
-                
-                # Пауза для соблюдения rate limits (уменьшена для ускорения)
-                time.sleep(0.5)  # Было 2 секунды, стало 0.5
-                
-            except Exception as e:
-                logger.error(f"  [ERROR] Ошибка обработки товара {spu_id}: {e}")
-                error_count += 1
+                    error_count += 1
         
         # Итоги
         logger.info("\n" + "="*70)
         logger.info("СИНХРОНИЗАЦИЯ ЗАВЕРШЕНА")
         logger.info("="*70)
-        logger.info(f"  Всего обработано: {len(products_list)}")
+        logger.info(f"  Всего обработано: {total_products}")
         logger.info(f"  Создано новых: {created_count}")
         logger.info(f"  Обновлено: {updated_count}")
         logger.info(f"  Пропущено: {skipped_count}")

@@ -1513,7 +1513,7 @@ def upload_products():
             })
         
         # Fallback: используем threading если Celery недоступен
-        logger.info("[Threading] Запускаем обработку в отдельном потоке")
+        logger.info("[Threading] Запускаем обработку в отдельном потоке (PARALLEL 5 threads)")
         
         # Запускаем обработку в отдельном потоке
         def process_products_thread():
@@ -1530,25 +1530,27 @@ def upload_products():
                 progress_queues[session_id].put({
                     'type': 'start',
                     'total': len(product_ids),
-                    'message': f'Начинаем обработку {len(product_ids)} товаров...'
+                    'message': f'Начинаем обработку {len(product_ids)} товаров в 5 потоков...'
                 })
                 
-                # Обрабатываем товары
                 results = []
-                for idx, spu_id in enumerate(product_ids, 1):
+                completed_count = 0
+                errors_count = 0
+                
+                # Функция для обработки одного товара (для пула потоков)
+                def process_single_item(idx, spu_id):
                     progress_queues[session_id].put({
                         'type': 'product_start',
                         'current': idx,
                         'total': len(product_ids),
                         'spu_id': spu_id,
-                        'message': f'[{idx}/{len(product_ids)}] Обработка товара {spu_id}...'
+                        'message': f'[{idx}/{len(product_ids)}] 🚀 Обработка товара {spu_id}...'
                     })
                     
-                    # Обрабатываем товар (бренд будет взят из Poizon API и очищен)
+                    # Обрабатываем товар
                     status = processor.process_product(spu_id)
-                    results.append(asdict(status))
                     
-                    # Отправляем результат обработки товара
+                    # Отправляем результат
                     progress_queues[session_id].put({
                         'type': 'product_done',
                         'current': idx,
@@ -1557,18 +1559,42 @@ def upload_products():
                         'status': status.status,
                         'message': status.message
                     })
+                    return asdict(status)
+
+                # ЗАПУСК В 5 ПОТОКОВ
+                with threading.Lock(): # Лок не нужен для очередей, но на всякий случай
+                    pass
+
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                
+                with ThreadPoolExecutor(max_workers=5) as executor:
+                    # Создаем задачи
+                    future_to_spu = {
+                        executor.submit(process_single_item, idx, spu_id): spu_id 
+                        for idx, spu_id in enumerate(product_ids, 1)
+                    }
+                    
+                    # Собираем результаты
+                    for future in as_completed(future_to_spu):
+                        try:
+                            res = future.result()
+                            results.append(res)
+                            if res['status'] == 'completed':
+                                completed_count += 1
+                            else:
+                                errors_count += 1
+                        except Exception as e:
+                            logger.error(f"Ошибка в потоке: {e}")
+                            errors_count += 1
                 
                 # Отправляем финальное сообщение
-                completed = sum(1 for r in results if r['status'] == 'completed')
-                errors = sum(1 for r in results if r['status'] == 'error')
-                
                 progress_queues[session_id].put({
                     'type': 'complete',
                     'results': results,
                     'total': len(results),
-                    'completed': completed,
-                    'errors': errors,
-                    'message': f'Готово! Успешно: {completed}, Ошибок: {errors}'
+                    'completed': completed_count,
+                    'errors': errors_count,
+                    'message': f'Готово! Успешно: {completed_count}, Ошибок: {errors_count}'
                 })
                 
                 # Сигнал завершения

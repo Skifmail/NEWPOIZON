@@ -29,10 +29,18 @@ class OpenAIService:
             base_url = base_url[:-1]
         self.api_url = f"{base_url}/chat/completions"
         
-        # Проверяем наличие прокси для OpenAI
-        self.proxy = os.getenv('OPENAI_PROXY')
-        if self.proxy:
-            logger.info(f"[OpenAI] Используется прокси: {self.proxy}")
+        # Настройка прокси для OpenAI (для обхода блокировок)
+        proxy_host = os.getenv('OPENAI_PROXY_HOST')
+        proxy_port = os.getenv('OPENAI_PROXY_PORT', '50100')  # HTTP/HTTPS порт
+        proxy_login = os.getenv('OPENAI_PROXY_LOGIN')
+        proxy_password = os.getenv('OPENAI_PROXY_PASSWORD')
+        
+        if proxy_host and proxy_login and proxy_password:
+            # Формат: http://login:password@host:port
+            self.proxy = f"http://{proxy_login}:{proxy_password}@{proxy_host}:{proxy_port}"
+            logger.info(f"[OpenAI] Используется прокси: {proxy_login}@{proxy_host}:{proxy_port}")
+        else:
+            self.proxy = None
         
         if 'api.openai.com' not in self.api_url:
             logger.info(f"[OpenAI] Используется альтернативный API: {self.api_url}")
@@ -116,7 +124,10 @@ class OpenAIService:
             if response.status_code == 200:
                 result = response.json()
                 result_text = result['choices'][0]['message']['content'].strip()
-                logger.info(f"[OpenAI] SEO контент сгенерирован для '{title}'")
+                usage = result.get('usage', {})
+                total_tokens = usage.get('total_tokens', 0)
+                
+                logger.info(f"[OpenAI] SEO контент сгенерирован для '{title}' (tokens: {total_tokens})")
                 
                 # Парсим ответ (логика из poizon_api_fixed.py)
                 lines = result_text.split('\n')
@@ -167,7 +178,8 @@ class OpenAIService:
                     'full_description': full_desc,
                     'seo_title': seo_title,
                     'meta_description': meta_desc,
-                    'keywords': tags
+                    'keywords': tags,
+                    'tokens': total_tokens
                 }
                 
             else:
