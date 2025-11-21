@@ -711,28 +711,76 @@ class PoisonAPIClientFixed:
             product_type = "Товар"
             poizon_cat_lower = poizon_category.lower()
             
-            # Проверяем китайские названия категорий (расширенная логика)
-            if '眼镜' in poizon_cat_lower or 'glasses' in poizon_cat_lower or 'sunglasses' in poizon_cat_lower or '太阳镜' in poizon_cat_lower:
+            # Проверяем китайские названия категорий (МАКСИМАЛЬНО РАСШИРЕННАЯ логика)
+            # ОЧКИ
+            if '眼镜' in poizon_cat_lower or 'glasses' in poizon_cat_lower or 'sunglasses' in poizon_cat_lower or '太阳镜' in poizon_cat_lower or '墨镜' in poizon_cat_lower or '镜框' in poizon_cat_lower:
                 product_type = "Очки"
-            elif '运动鞋' in poizon_cat_lower or '板鞋' in poizon_cat_lower or '休闲鞋' in poizon_cat_lower or 'sneakers' in poizon_cat_lower:
+            
+            # КРОССОВКИ (все возможные варианты спортивной обуви)
+            elif ('运动鞋' in poizon_cat_lower or '板鞋' in poizon_cat_lower or '休闲鞋' in poizon_cat_lower or 
+                  '篮球鞋' in poizon_cat_lower or '足球鞋' in poizon_cat_lower or '跑鞋' in poizon_cat_lower or '跑步鞋' in poizon_cat_lower or
+                  '训练鞋' in poizon_cat_lower or '健身鞋' in poizon_cat_lower or '网球鞋' in poizon_cat_lower or '羽毛球鞋' in poizon_cat_lower or
+                  '滑板鞋' in poizon_cat_lower or '帆布鞋' in poizon_cat_lower or '复古鞋' in poizon_cat_lower or '老爹鞋' in poizon_cat_lower or
+                  '小白鞋' in poizon_cat_lower or '高帮' in poizon_cat_lower or '低帮' in poizon_cat_lower or '中帮' in poizon_cat_lower or
+                  '儿童板鞋' in poizon_cat_lower or '男士板鞋' in poizon_cat_lower or '女士板鞋' in poizon_cat_lower or
+                  '儿童篮球鞋' in poizon_cat_lower or '男士篮球鞋' in poizon_cat_lower or '女士篮球鞋' in poizon_cat_lower or
+                  '儿童运动鞋' in poizon_cat_lower or '男士运动鞋' in poizon_cat_lower or '女士运动鞋' in poizon_cat_lower or
+                  '儿童休闲' in poizon_cat_lower or '男士休闲' in poizon_cat_lower or '女士休闲' in poizon_cat_lower or
+                  'sneakers' in poizon_cat_lower or 'basketball' in poizon_cat_lower or 'running' in poizon_cat_lower or
+                  'trainers' in poizon_cat_lower or 'athletic' in poizon_cat_lower):
                 product_type = "Кроссовки"
-            elif '户外靴' in poizon_cat_lower or '马丁靴' in poizon_cat_lower or '工装靴' in poizon_cat_lower or '靴' in poizon_cat_lower or 'boots' in poizon_cat_lower:
+            
+            # БОТИНКИ (все варианты высокой обуви)
+            elif ('户外靴' in poizon_cat_lower or '马丁靴' in poizon_cat_lower or '工装靴' in poizon_cat_lower or '切尔西靴' in poizon_cat_lower or
+                  '雪地靴' in poizon_cat_lower or '短靴' in poizon_cat_lower or '高筒靴' in poizon_cat_lower or '登山靴' in poizon_cat_lower or
+                  '靴' in poizon_cat_lower or 'boots' in poizon_cat_lower or 'boot' in poizon_cat_lower):
                 product_type = "Ботинки"
-            elif '拖鞋' in poizon_cat_lower or '凉鞋' in poizon_cat_lower or 'sandals' in poizon_cat_lower:
+            
+            # САНДАЛИИ И ТАПКИ
+            elif ('拖鞋' in poizon_cat_lower or '凉鞋' in poizon_cat_lower or '洞洞鞋' in poizon_cat_lower or '人字拖' in poizon_cat_lower or
+                  '沙滩鞋' in poizon_cat_lower or '凉拖' in poizon_cat_lower or 'sandals' in poizon_cat_lower or 'slides' in poizon_cat_lower or
+                  'slippers' in poizon_cat_lower or 'flip-flops' in poizon_cat_lower or 'crocs' in poizon_cat_lower):
                 product_type = "Сандалии"
-            # ВАЖНО: куртки и верхняя одежда идут ДО общей проверки на "одежда"
-            elif '夹克' in poizon_cat_lower or '外套' in poizon_cat_lower or '羽绒服' in poizon_cat_lower or '棉服' in poizon_cat_lower or 'jacket' in poizon_cat_lower or 'coat' in poizon_cat_lower or 'parka' in poizon_cat_lower:
+            # КУРТКИ И ВЕРХНЯЯ ОДЕЖДА (важно: проверяем ДО общей "одежда")
+            elif ('夹克' in poizon_cat_lower or '外套' in poizon_cat_lower or '羽绒服' in poizon_cat_lower or '棉服' in poizon_cat_lower or
+                  '风衣' in poizon_cat_lower or '冲锋衣' in poizon_cat_lower or '皮衣' in poizon_cat_lower or '大衣' in poizon_cat_lower or
+                  '棉袄' in poizon_cat_lower or '马甲' in poizon_cat_lower or '背心' in poizon_cat_lower or
+                  'jacket' in poizon_cat_lower or 'coat' in poizon_cat_lower or 'parka' in poizon_cat_lower or
+                  'windbreaker' in poizon_cat_lower or 'bomber' in poizon_cat_lower or 'blazer' in poizon_cat_lower):
                 product_type = "Куртка"
-            elif 'T恤' in poizon_cat_lower or '短袖' in poizon_cat_lower or 't-shirt' in poizon_cat_lower or 'tee' in poizon_cat_lower:
+            
+            # ФУТБОЛКИ
+            elif ('T恤' in poizon_cat_lower or '短袖' in poizon_cat_lower or 'polo' in poizon_cat_lower or
+                  't-shirt' in poizon_cat_lower or 'tee' in poizon_cat_lower or 'tshirt' in poizon_cat_lower):
                 product_type = "Футболка"
-            elif '卫衣' in poizon_cat_lower or '连帽衫' in poizon_cat_lower or 'hoodie' in poizon_cat_lower or 'sweatshirt' in poizon_cat_lower:
+            
+            # ТОЛСТОВКИ И СВИТШОТЫ
+            elif ('卫衣' in poizon_cat_lower or '连帽衫' in poizon_cat_lower or '套头衫' in poizon_cat_lower or '拉链衫' in poizon_cat_lower or
+                  '长袖' in poizon_cat_lower or '毛衣' in poizon_cat_lower or '针织衫' in poizon_cat_lower or
+                  'hoodie' in poizon_cat_lower or 'sweatshirt' in poizon_cat_lower or 'sweater' in poizon_cat_lower or
+                  'pullover' in poizon_cat_lower or 'crewneck' in poizon_cat_lower):
                 product_type = "Толстовка"
-            elif '裤' in poizon_cat_lower and '短裤' not in poizon_cat_lower:
+            
+            # БРЮКИ (но НЕ шорты)
+            elif ('裤' in poizon_cat_lower and '短裤' not in poizon_cat_lower) or '长裤' in poizon_cat_lower or '休闲裤' in poizon_cat_lower or '运动裤' in poizon_cat_lower or '牛仔裤' in poizon_cat_lower or '工装裤' in poizon_cat_lower:
                 product_type = "Брюки"
-            elif '短裤' in poizon_cat_lower or 'shorts' in poizon_cat_lower:
+            
+            # ШОРТЫ
+            elif '短裤' in poizon_cat_lower or 'shorts' in poizon_cat_lower or '五分裤' in poizon_cat_lower or '七分裤' in poizon_cat_lower:
                 product_type = "Шорты"
-            elif '帽' in poizon_cat_lower or 'cap' in poizon_cat_lower or 'hat' in poizon_cat_lower:
+            
+            # ГОЛОВНЫЕ УБОРЫ
+            elif ('帽' in poizon_cat_lower or '鸭舌帽' in poizon_cat_lower or '棒球帽' in poizon_cat_lower or '渔夫帽' in poizon_cat_lower or
+                  '贝雷帽' in poizon_cat_lower or '针织帽' in poizon_cat_lower or '毛线帽' in poizon_cat_lower or
+                  'cap' in poizon_cat_lower or 'hat' in poizon_cat_lower or 'beanie' in poizon_cat_lower or 'bucket' in poizon_cat_lower):
                 product_type = "Кепка"
+            
+            # СУМКИ И РЮКЗАКИ
+            elif ('包' in poizon_cat_lower or '背包' in poizon_cat_lower or '单肩包' in poizon_cat_lower or '双肩包' in poizon_cat_lower or
+                  '手提包' in poizon_cat_lower or '腰包' in poizon_cat_lower or '胸包' in poizon_cat_lower or
+                  'bag' in poizon_cat_lower or 'backpack' in poizon_cat_lower or 'shoulder' in poizon_cat_lower or
+                  'crossbody' in poizon_cat_lower or 'waist' in poizon_cat_lower):
+                product_type = "Сумка"
             # Fallback на WordPress категорию (проверяем обе категории)
             else:
                 combined_category = f"{wordpress_category} {poizon_category}".lower()
