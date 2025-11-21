@@ -25,6 +25,9 @@ import time
 # Импортируем рабочий клиент Poizon API
 from poizon_api_fixed import PoisonAPIClientFixed
 
+# Импортируем OpenAI Service для использования централизованной функции очистки
+from openai_service import OpenAIService
+
 # Импортируем обработчик изображений
 from image_processor import resize_image_to_square
 
@@ -642,56 +645,12 @@ class WooCommerceService:
             product_name = getattr(product, 'title_ru', None) or getattr(product, 'seo_title', product.title) or product.title
             logger.info(f"Название из API: {product_name[:100]}")
             
-            # КРИТИЧЕСКИ ВАЖНО: Финальная очистка названия от иероглифов и кириллицы!
-            import re
-            
-            def clean_chinese_final(text: str) -> str:
-                """ИЗВЛЕКАЕТ латиницу, кириллицу, цифры и базовые символы из текста (удаляет только иероглифы)"""
-                if not text:
-                    return ""
-                
-                # НОВЫЙ ПОДХОД: ИЗВЛЕКАЕМ нужные символы (латиница + кириллица), удаляем иероглифы
-                result = []
-                for char in text:
-                    code = ord(char)
-                    # ASCII латиница и цифры
-                    if (0x0041 <= code <= 0x005A or   # A-Z
-                        0x0061 <= code <= 0x007A or   # a-z
-                        0x0030 <= code <= 0x0039 or   # 0-9
-                        0x0410 <= code <= 0x044F or   # А-я (кириллица)
-                        code == 0x0020 or              # пробел
-                        code == 0x002D or              # тире -
-                        code == 0x0027 or              # апостроф '
-                        code == 0x002E or              # точка .
-                        code == 0x002C):               # запятая ,
-                        result.append(char)
-                    # Полноширинные латинские (конвертируем в обычные)
-                    elif 0xFF21 <= code <= 0xFF3A:  # Ａ-Ｚ
-                        result.append(chr(code - 0xFEE0))
-                    elif 0xFF41 <= code <= 0xFF5A:  # ａ-ｚ
-                        result.append(chr(code - 0xFEE0))
-                    elif 0xFF10 <= code <= 0xFF19:  # ０-９
-                        result.append(chr(code - 0xFEE0))
-                    # Все остальное игнорируем (иероглифы, спецсимволы)
-                
-                text = ''.join(result)
-                
-                # Убираем множественные пробелы
-                text = re.sub(r'\s+', ' ', text).strip()
-                text = text.strip(' -.,')
-                
-                # Если осталось меньше 3 символов - пустая строка
-                if not text or len(text) < 3:
-                    return ""
-                
-                return text
-            
-            # Применяем очистку к названию (убираем иероглифы и кириллицу типа "Ботинки")
-            product_name = clean_chinese_final(product_name)
+            # Используем централизованную функцию очистки текста
+            product_name = OpenAIService.clean_chinese_text(product_name)
             logger.info(f"Название после очистки: '{product_name}'")
             
-            # Очищаем бренд от иероглифов (на случай если он еще содержит их)
-            brand_clean = clean_chinese_final(product.brand) if product.brand else "Brand"
+            # Очищаем бренд от иероглифов
+            brand_clean = OpenAIService.clean_chinese_text(product.brand) if product.brand else "Brand"
             
             # Если после очистки пусто или мусор - используем очищенный бренд + артикул
             if not product_name or len(product_name.strip()) < 3 or product_name.strip() in ['-', '-(', '-(-', '(', ')']:
@@ -1245,30 +1204,9 @@ class WooCommerceService:
             # Используем SEO title
             product_name = getattr(product, 'seo_title', product.title) or product.title
             
-            # Очистка названия от иероглифов
-            import re
-            def clean_chinese_final(text: str) -> str:
-                if not text:
-                    return ""
-                result = []
-                for char in text:
-                    code = ord(char)
-                    if (0x0041 <= code <= 0x005A or 0x0061 <= code <= 0x007A or 
-                        0x0030 <= code <= 0x0039 or 0x0410 <= code <= 0x044F or 
-                        code in [0x0020, 0x002D, 0x0027, 0x002E, 0x002C]):
-                        result.append(char)
-                    elif 0xFF21 <= code <= 0xFF3A:
-                        result.append(chr(code - 0xFEE0))
-                    elif 0xFF41 <= code <= 0xFF5A:
-                        result.append(chr(code - 0xFEE0))
-                    elif 0xFF10 <= code <= 0xFF19:
-                        result.append(chr(code - 0xFEE0))
-                text = ''.join(result)
-                text = re.sub(r'\s+', ' ', text).strip()
-                return text.strip(' -.,')
-            
-            product_name = clean_chinese_final(product_name)
-            brand_clean = clean_chinese_final(product.brand) if product.brand else "Brand"
+            # Используем централизованную функцию очистки текста
+            product_name = OpenAIService.clean_chinese_text(product_name)
+            brand_clean = OpenAIService.clean_chinese_text(product.brand) if product.brand else "Brand"
             
             if not product_name or len(product_name.strip()) < 3:
                 product_name = f"{brand_clean} {product.article_number}".strip()

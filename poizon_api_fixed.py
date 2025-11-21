@@ -298,51 +298,7 @@ class PoisonAPIClientFixed:
             logger.error(f"[ERROR] Ошибка получения цен {spu_id}: {e}")
             return {}
     
-    def generate_seo_content(self, brand: str, product_type: str, product_name: str, sku: str, color: str = "", material: str = "") -> Optional[Dict]:
-        """
-        Генерирует SEO-контент через OpenAIService.
-        
-        Args:
-            brand: Название бренда
-            product_type: Тип товара (Кроссовки, Куртка и т.д.)
-            product_name: Название модели
-            sku: Артикул
-            color: Цвет (опционально)
-            material: Материал (опционально)
-            
-        Returns:
-            Словарь с полями: seo_title, short_description, description, meta_description, keywords, tags
-            или None при ошибке
-        """
-        # Формируем атрибуты для передачи в сервис
-        attributes = []
-        if color:
-            attributes.append({'name': 'Color', 'value': color})
-        if material:
-            attributes.append({'name': 'Material', 'value': material})
-            
-        # Вызываем сервис
-        seo_data = self.openai_service.translate_and_generate_seo(
-            title=product_name,
-            description="",
-            category=product_type,
-            brand=brand,
-            attributes=attributes,
-            article_number=sku
-        )
-        
-        if not seo_data:
-            return None
-            
-        # Маппинг результатов
-        return {
-            'seo_title': seo_data.get('seo_title', ''),
-            'short_description': seo_data.get('short_description', ''),
-            'description': seo_data.get('full_description', ''),
-            'meta_description': seo_data.get('meta_description', ''),
-            'keywords': seo_data.get('keywords', ''),
-            'tags': [brand]
-        }
+
     
     def get_product_full_info(self, spu_id: int):
         """
@@ -756,7 +712,9 @@ class PoisonAPIClientFixed:
             poizon_cat_lower = poizon_category.lower()
             
             # Проверяем китайские названия категорий (расширенная логика)
-            if '运动鞋' in poizon_cat_lower or '板鞋' in poizon_cat_lower or '休闲鞋' in poizon_cat_lower or 'sneakers' in poizon_cat_lower:
+            if '眼镜' in poizon_cat_lower or 'glasses' in poizon_cat_lower or 'sunglasses' in poizon_cat_lower or '太阳镜' in poizon_cat_lower:
+                product_type = "Очки"
+            elif '运动鞋' in poizon_cat_lower or '板鞋' in poizon_cat_lower or '休闲鞋' in poizon_cat_lower or 'sneakers' in poizon_cat_lower:
                 product_type = "Кроссовки"
             elif '户外靴' in poizon_cat_lower or '马丁靴' in poizon_cat_lower or '工装靴' in poizon_cat_lower or '靴' in poizon_cat_lower or 'boots' in poizon_cat_lower:
                 product_type = "Ботинки"
@@ -778,7 +736,9 @@ class PoisonAPIClientFixed:
             # Fallback на WordPress категорию (проверяем обе категории)
             else:
                 combined_category = f"{wordpress_category} {poizon_category}".lower()
-                if 'кроссовки' in combined_category or 'sneakers' in combined_category or 'trainers' in combined_category:
+                if 'очки' in combined_category or 'glasses' in combined_category or 'sunglasses' in combined_category:
+                    product_type = "Очки"
+                elif 'кроссовки' in combined_category or 'sneakers' in combined_category or 'trainers' in combined_category:
                     product_type = "Кроссовки"
                 elif 'ботинки' in combined_category or 'boots' in combined_category or 'сапоги' in combined_category:
                     product_type = "Ботинки"
@@ -808,44 +768,38 @@ class PoisonAPIClientFixed:
             color = attributes.get('Цвет', attributes.get('Color', ''))
             material = attributes.get('Материал', attributes.get('Material', ''))
             
-            # Функция для очистки от иероглифов
-            def clean_chinese(text: str) -> str:
-                result = []
-                for char in text:
-                    code = ord(char)
-                    if ((0x0041 <= code <= 0x005A) or  # A-Z
-                        (0x0061 <= code <= 0x007A) or  # a-z
-                        (0x0030 <= code <= 0x0039) or  # 0-9
-                        (0x0410 <= code <= 0x044F) or  # А-я
-                        code in [0x0020, 0x002D, 0x0027, 0x002E, 0x002C, 0x002F, 0x003A, 0x003B, 0x0028, 0x0029, 0x0021, 0x003F]):
-                        result.append(char)
-                return ''.join(result).strip()
-            
             # Извлекаем название модели из title (убираем бренд и китайские символы)
             product_title = detail.get('title', '')
             product_name = product_title.replace(brand_name, '').strip()
             product_name = re.sub(r'【[^】]+】', '', product_name).strip()  # Убираем китайские скобки
-            product_name = clean_chinese(product_name)  # Очищаем от всех иероглифов
+            product_name = self.openai_service.clean_chinese_text(product_name)  # Очищаем через централизованную функцию
             
-            # Генерируем SEO-контент
-            seo_content = self.generate_seo_content(
+            # Формируем атрибуты для OpenAI
+            attributes = []
+            if color:
+                attributes.append({'name': 'Color', 'value': color})
+            if material:
+                attributes.append({'name': 'Material', 'value': material})
+            
+            # Генерируем SEO-контент напрямую через OpenAI Service
+            seo_content = self.openai_service.translate_and_generate_seo(
+                title=product_name,
+                description="",
+                category=product_type,
                 brand=brand_name,
-                product_type=product_type,
-                product_name=product_name,
-                sku=detail.get('articleNumber', ''),
-                color=color,
-                material=material
+                attributes=attributes,
+                article_number=detail.get('articleNumber', '')
             )
             
             # Используем сгенерированный контент или fallback на базовый
             if seo_content:
                 title_ru = seo_content.get('title_ru', '')
-                seo_title = seo_content['seo_title']
-                short_description = seo_content['short_description']
-                full_description = seo_content['description']
-                meta_description = seo_content['meta_description']
-                keywords = seo_content['keywords']
-                tags = seo_content['tags']
+                seo_title = seo_content.get('seo_title', '')
+                short_description = seo_content.get('short_description', '')
+                full_description = seo_content.get('full_description', '')
+                meta_description = seo_content.get('meta_description', '')
+                keywords = seo_content.get('keywords', '')
+                tags = [brand_name]
             else:
                 # Fallback: базовый контент если GPT-4o-mini не сработал
                 title_ru = f"{product_type} {brand_name} {detail.get('articleNumber', '')}"

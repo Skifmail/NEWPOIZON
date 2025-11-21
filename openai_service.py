@@ -57,6 +57,42 @@ class OpenAIService:
         if not self.api_key:
             logger.warning("OPENAI_API_KEY не найден в .env")
     
+    @staticmethod
+    def clean_chinese_text(text: str) -> str:
+        """
+        Централизованная функция очистки текста от иероглифов.
+        Удаляет китайские символы, оставляет латиницу, кириллицу, цифры.
+        Конвертирует полноширинные символы в обычные.
+        
+        Args:
+            text: Исходный текст
+            
+        Returns:
+            Очищенный текст
+        """
+        if not text:
+            return ""
+        
+        result = []
+        for char in text:
+            code = ord(char)
+            # ASCII латиница, цифры и базовые символы
+            if ((0x0041 <= code <= 0x005A) or   # A-Z
+                (0x0061 <= code <= 0x007A) or   # a-z
+                (0x0030 <= code <= 0x0039) or   # 0-9
+                (0x0410 <= code <= 0x044F) or   # А-я (кириллица)
+                code in [0x0020, 0x002D, 0x0027, 0x002E, 0x002C, 0x002F, 0x003A, 0x003B, 0x0028, 0x0029, 0x0021, 0x003F]):
+                result.append(char)
+            # Конвертация полноширинных латинских в обычные
+            elif 0xFF21 <= code <= 0xFF3A:  # Ａ-Ｚ → A-Z
+                result.append(chr(code - 0xFEE0))
+            elif 0xFF41 <= code <= 0xFF5A:  # ａ-ｚ → a-z
+                result.append(chr(code - 0xFEE0))
+            elif 0xFF10 <= code <= 0xFF19:  # ０-９ → 0-9
+                result.append(chr(code - 0xFEE0))
+        
+        return ''.join(result).strip()
+    
     def translate_and_generate_seo(self, title: str, description: str, category: str, brand: str, attributes: list = None, article_number: str = "") -> dict:
         """
         Генерирует SEO-контент, используя промпт из poizon_api_fixed.py.
@@ -163,26 +199,13 @@ class OpenAIService:
                     logger.error(f"[OpenAI] Недостаточно строк в ответе: {len(parsed_lines)}")
                     return {}
                 
-                # Очистка от китайских символов
-                def clean_chinese(text: str) -> str:
-                    result = []
-                    for char in text:
-                        code = ord(char)
-                        if ((0x0041 <= code <= 0x005A) or  # A-Z
-                            (0x0061 <= code <= 0x007A) or  # a-z
-                            (0x0030 <= code <= 0x0039) or  # 0-9
-                            (0x0410 <= code <= 0x044F) or  # А-я
-                            code in [0x0020, 0x002D, 0x0027, 0x002E, 0x002C, 0x002F, 0x003A, 0x003B, 0x0028, 0x0029, 0x0021, 0x003F]):
-                            result.append(char)
-                    return ''.join(result).strip()
-                
-                # Извлекаем поля и очищаем от иероглифов
-                title_ru = clean_chinese(parsed_lines[0])
-                short_desc = clean_chinese(parsed_lines[1])
-                full_desc = clean_chinese(parsed_lines[2])
-                seo_title = clean_chinese(parsed_lines[3])
-                meta_desc = clean_chinese(parsed_lines[4])
-                tags = clean_chinese(parsed_lines[5])
+                # Извлекаем поля и очищаем от иероглифов через централизованную функцию
+                title_ru = self.clean_chinese_text(parsed_lines[0])
+                short_desc = self.clean_chinese_text(parsed_lines[1])
+                full_desc = self.clean_chinese_text(parsed_lines[2])
+                seo_title = self.clean_chinese_text(parsed_lines[3])
+                meta_desc = self.clean_chinese_text(parsed_lines[4])
+                tags = self.clean_chinese_text(parsed_lines[5])
                 
                 # ЖЕСТКАЯ ОЧИСТКА НАЗВАНИЯ
                 # 1. Если есть артикул - находим его позицию и обрезаем ВСЁ после него
@@ -259,83 +282,3 @@ class OpenAIService:
         except Exception as e:
             logger.error(f"[OpenAI] Ошибка генерации SEO: {e}")
             return {}
-
-    def generate_seo_description(self, product_title: str, brand: str, category: str) -> str:
-        """
-        Генерирует SEO-оптимизированное описание товара.
-        
-        Args:
-            product_title: Название товара
-            brand: Бренд
-            category: Категория
-            
-        Returns:
-            Сгенерированное описание или пустую строку при ошибке
-        """
-        if not self.api_key:
-            return ""
-            
-        try:
-            prompt = f"""
-            Напиши продающее SEO-описание для товара:
-            Название: {product_title}
-            Бренд: {brand}
-            Категория: {category}
-            
-            Требования:
-            1. Уникальность и привлекательность для покупателя
-            2. Использовать ключевые слова: купить, цена, оригинал, доставка
-            3. Длина: 3-4 предложения
-            4. Язык: Русский
-            5. Без воды, только по делу
-            """
-            
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            data = {
-                "model": "gpt-4o-mini",  # Используем доступную модель
-                "messages": [
-                    {"role": "system", "content": "Ты профессиональный копирайтер для интернет-магазина кроссовок и одежды."},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.7,
-                "max_tokens": 300
-            }
-            
-            # Настройка прокси если есть
-            proxies = None
-            if self.proxy:
-                proxies = {
-                    "http": self.proxy,
-                    "https": self.proxy
-                }
-            
-            # Вызов API с защитой Circuit Breaker
-            response = openai_breaker.call(
-                lambda: requests.post(
-                    self.api_url, 
-                    headers=headers, 
-                    json=data, 
-                    timeout=15,
-                    proxies=proxies
-                )
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                content = result['choices'][0]['message']['content'].strip()
-                logger.info(f"[OpenAI] Описание сгенерировано для '{product_title}'")
-                return content
-            else:
-                logger.error(f"[OpenAI] Ошибка API {response.status_code}: {response.text}")
-                return ""
-                
-        except CircuitBreakerError:
-            logger.warning("[OpenAI] API временно недоступен (Circuit Breaker open)")
-            return ""
-        except Exception as e:
-            logger.error(f"[OpenAI] Ошибка генерации описания: {e}")
-            return ""
