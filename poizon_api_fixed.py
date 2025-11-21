@@ -839,6 +839,7 @@ class PoisonAPIClientFixed:
             
             # Используем сгенерированный контент или fallback на базовый
             if seo_content:
+                title_ru = seo_content.get('title_ru', '')
                 seo_title = seo_content['seo_title']
                 short_description = seo_content['short_description']
                 full_description = seo_content['description']
@@ -847,6 +848,7 @@ class PoisonAPIClientFixed:
                 tags = seo_content['tags']
             else:
                 # Fallback: базовый контент если GPT-4o-mini не сработал
+                title_ru = f"{product_type} {brand_name} {detail.get('articleNumber', '')}"
                 seo_title = f"{product_type} {brand_name} {product_name}"
                 short_description = f"{product_type} {brand_name} {product_name}. Артикул: {detail.get('articleNumber', '')}"
                 full_description = detail.get('desc', '')
@@ -873,7 +875,8 @@ class PoisonAPIClientFixed:
                 attributes=attributes,
                 description=full_description,
                 # Новые SEO-поля
-                seo_title=seo_title,
+                title_ru=title_ru,  # Очищенное название для WordPress
+                seo_title=seo_title,  # SEO заголовок (может быть длиннее)
                 short_description=short_description,
                 meta_description=meta_description,
                 keywords=keywords,

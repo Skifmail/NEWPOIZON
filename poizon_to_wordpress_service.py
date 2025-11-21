@@ -638,7 +638,8 @@ class WooCommerceService:
             # Используем SEO title (уже очищенный от иероглифов в poizon_api_fixed.py)
             # SEO title имеет формат "Тип Бренд Модель" (например "Ботинки CAT Colorado")
             # Но для WordPress нужно название только на латинице
-            product_name = getattr(product, 'seo_title', product.title) or product.title
+            # Используем title_ru (очищенное название) вместо seo_title
+            product_name = getattr(product, 'title_ru', None) or getattr(product, 'seo_title', product.title) or product.title
             logger.info(f"Название из API: {product_name[:100]}")
             
             # КРИТИЧЕСКИ ВАЖНО: Финальная очистка названия от иероглифов и кириллицы!
