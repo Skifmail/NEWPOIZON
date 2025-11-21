@@ -774,6 +774,9 @@ class PoisonAPIClientFixed:
             product_name = re.sub(r'【[^】]+】', '', product_name).strip()  # Убираем китайские скобки
             product_name = self.openai_service.clean_chinese_text(product_name)  # Очищаем через централизованную функцию
             
+            # Очищаем бренд от иероглифов перед передачей в OpenAI
+            brand_clean = self.openai_service.clean_chinese_text(brand_name)
+            
             # Формируем атрибуты для OpenAI (используем другое имя чтобы не перезаписать product.attributes)
             openai_attributes = []
             if color:
@@ -781,12 +784,12 @@ class PoisonAPIClientFixed:
             if material:
                 openai_attributes.append({'name': 'Material', 'value': material})
             
-            # Генерируем SEO-контент напрямую через OpenAI Service
+            # Генерируем SEO-контент напрямую через OpenAI Service (используем очищенный бренд)
             seo_content = self.openai_service.translate_and_generate_seo(
                 title=product_name,
                 description="",
                 category=product_type,
-                brand=brand_name,
+                brand=brand_clean,  # Используем очищенный бренд без иероглифов
                 attributes=openai_attributes,
                 article_number=detail.get('articleNumber', '')
             )
@@ -799,17 +802,17 @@ class PoisonAPIClientFixed:
                 full_description = seo_content.get('full_description', '')
                 meta_description = seo_content.get('meta_description', '')
                 keywords = seo_content.get('keywords', '')
-                tags = [brand_name]
+                tags = [brand_clean]  # Используем очищенный бренд для тегов
                 logger.info(f"✅ OpenAI вернул title_ru: '{title_ru}', seo_title: '{seo_title[:50] if seo_title else 'пусто'}'...")
             else:
-                # Fallback: базовый контент если GPT-4o-mini не сработал
-                title_ru = f"{product_type} {brand_name} {detail.get('articleNumber', '')}"
-                seo_title = f"{product_type} {brand_name} {product_name}"
-                short_description = f"{product_type} {brand_name} {product_name}. Артикул: {detail.get('articleNumber', '')}"
+                # Fallback: базовый контент если GPT-4o-mini не сработал (используем очищенный бренд)
+                title_ru = f"{product_type} {brand_clean} {detail.get('articleNumber', '')}"
+                seo_title = f"{product_type} {brand_clean} {product_name}"
+                short_description = f"{product_type} {brand_clean} {product_name}. Артикул: {detail.get('articleNumber', '')}"
                 full_description = detail.get('desc', '')
-                meta_description = f"{product_type} {brand_name} {product_name}. Закажи онлайн!"
-                keywords = brand_name
-                tags = [brand_name]
+                meta_description = f"{product_type} {brand_clean} {product_name}. Закажи онлайн!"
+                keywords = brand_clean
+                tags = [brand_clean]
                 logger.warning(f"⚠️  Используется fallback контент (GPT-4o-mini недоступен)")
             
             # Создаем объект товара (простой dict вместо dataclass)
