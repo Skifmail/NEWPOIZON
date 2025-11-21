@@ -1290,20 +1290,18 @@
                 
                 progressLog.innerHTML += `<div class="progress-log-entry success">✓ Товар найден: ${product.name}</div>`;
                 
-                // Отображаем товар в таблице
-                allProducts = [product];
-                renderProducts();
-                
-                // Автоматически выбираем товар
+                // Автоматически выбираем товар ДО отрисовки
                 selectedProductIds.clear();
                 selectedProductIds.add(product.id);
+                
+                // Отображаем товар в таблице (чекбокс будет отмечен автоматически)
+                allProducts = [product];
+                renderProducts();
                 updateSelectedCount();
                 
-                // Отмечаем чекбокс
-                const checkbox = document.querySelector(`.product-checkbox[value="${product.id}"]`);
-                if (checkbox) checkbox.checked = true;
-                
                 progressLog.innerHTML += `<div class="progress-log-entry info">🔄 Запуск обновления цен и остатков...</div>`;
+                
+                console.log('[searchByProductId] Выбран товар:', product.id, 'selectedProductIds:', Array.from(selectedProductIds));
                 
                 // 2. Автоматически обновляем цены
                 setTimeout(() => {
