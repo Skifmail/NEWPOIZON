@@ -1883,6 +1883,9 @@ def update_prices_and_stock():
         # Создаем очередь для этой сессии
         progress_queues[session_id] = queue.Queue()
         
+        # Получаем флаг обновления контента
+        update_content = settings_data.get('update_content', False)
+        
         # Создаем настройки
         settings = SyncSettings(
             currency_rate=settings_data.get('currency_rate', 13.5),
