@@ -1293,7 +1293,7 @@
                 updateSelectedCount();
                 
                 // Отмечаем чекбокс
-                const checkbox = document.querySelector(`input[data-product-id="${product.id}"]`);
+                const checkbox = document.querySelector(`.product-checkbox[value="${product.id}"]`);
                 if (checkbox) checkbox.checked = true;
                 
                 progressLog.innerHTML += `<div class="progress-log-entry info">🔄 Запуск обновления цен и остатков...</div>`;
