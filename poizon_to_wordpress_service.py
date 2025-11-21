@@ -1186,7 +1186,10 @@ class WooCommerceService:
         try:
             url = f"{self.url}/wp-json/wc/v3/products/{product_id}"
             
-            # Формируем SEO теги
+            # Очищаем бренд от иероглифов СРАЗУ (нужен для тегов и названия)
+            brand_clean = OpenAIService.clean_chinese_text(product.brand) if product.brand else "Brand"
+            
+            # Формируем SEO теги (используем очищенные теги от OpenAI)
             tags = []
             if hasattr(product, 'tags') and product.tags:
                 for tag_name in product.tags:
@@ -1203,12 +1206,13 @@ class WooCommerceService:
             if hasattr(product, 'keywords') and product.keywords:
                 meta_data.append({'key': '_yoast_wpseo_focuskw', 'value': product.keywords})
             
-            # Используем SEO title
-            product_name = getattr(product, 'seo_title', product.title) or product.title
+            # ВАЖНО: Используем title_ru (как в create_product), а не seo_title!
+            # title_ru = "Кроссовки New Balance 2002R M2002RDC"
+            # seo_title = "New Balance NB 2002R M2002RDC качественные кроссовки" (с описательными словами)
+            product_name = getattr(product, 'title_ru', None) or getattr(product, 'seo_title', product.title) or product.title
             
             # Используем централизованную функцию очистки текста
             product_name = OpenAIService.clean_chinese_text(product_name)
-            brand_clean = OpenAIService.clean_chinese_text(product.brand) if product.brand else "Brand"
             
             if not product_name or len(product_name.strip()) < 3:
                 product_name = f"{brand_clean} {product.article_number}".strip()
