@@ -1917,8 +1917,7 @@ def update_prices_and_stock():
         
         # Запускаем обновление в отдельном потоке
         def update_prices_thread():
-            # Замыкание для доступа к update_content из внешней области
-            nonlocal update_content
+            # update_content доступен через замыкание (closure)
             results = []
             updated_count = 0
             error_count = 0
