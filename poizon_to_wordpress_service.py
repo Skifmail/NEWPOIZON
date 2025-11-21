@@ -1208,14 +1208,15 @@ class WooCommerceService:
             logger.error(f"[ERROR] Ошибка обновления вариаций товара {product_id}: {e}")
             return 0
     
-    def update_product_with_seo(self, product_id: int, product: PoisonProduct, settings: SyncSettings) -> bool:
+    def update_product_with_seo(self, product_id: int, product: PoisonProduct, settings: SyncSettings, update_images: bool = True) -> bool:
         """
-        Обновляет товар с полным SEO контентом (описание, теги, мета) + цены и остатки.
+        Обновляет товар с полным SEO контентом (описание, теги, мета) + цены и остатки + изображения.
         
         Args:
             product_id: ID товара в WordPress
             product: Объект товара из Poizon с SEO полями
             settings: Настройки синхронизации
+            update_images: Обновлять ли изображения (600x600)
             
         Returns:
             True если успешно, False при ошибке
@@ -1273,6 +1274,29 @@ class WooCommerceService:
             elif brand_clean.upper() not in product_name.upper():
                 product_name = f"{brand_clean} {product_name}"
             
+            # Обновляем изображения если нужно
+            processed_images = []
+            if update_images and product.images:
+                logger.info(f"  Обновление изображений ({len(product.images[:5])} шт, 600x600)...")
+                article_number = getattr(product, 'article_number', '')
+                
+                for idx, img_url in enumerate(product.images[:5], 1):
+                    filename = f"{product.brand}_{product.title.replace(' ', '_')}_{article_number}_{idx}.jpg"
+                    filename = filename.replace('/', '_').replace('\\', '_')
+                    
+                    media_id = self.upload_resized_image(img_url, filename, size=600)
+                    
+                    if media_id:
+                        processed_images.append({'id': media_id})
+                    else:
+                        logger.warning(f"  Не удалось загрузить изображение {idx}")
+                        processed_images.append({
+                            'src': img_url,
+                            'alt': f"{product.brand} {product.title} {article_number}"
+                        })
+                
+                logger.info(f"  ✓ Загружено {len(processed_images)} изображений")
+            
             # Данные для обновления
             update_data = {
                 'name': product_name,
@@ -1281,6 +1305,10 @@ class WooCommerceService:
                 'tags': tags,
                 'meta_data': meta_data
             }
+            
+            # Добавляем изображения если были обновлены
+            if processed_images:
+                update_data['images'] = processed_images
             
             # Обновляем товар
             response = requests.put(url, auth=self.auth, json=update_data, verify=False, timeout=60)

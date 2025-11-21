@@ -1917,6 +1917,8 @@ def update_prices_and_stock():
         
         # Запускаем обновление в отдельном потоке
         def update_prices_thread():
+            # Замыкание для доступа к update_content из внешней области
+            nonlocal update_content
             results = []
             updated_count = 0
             error_count = 0
@@ -2039,11 +2041,11 @@ def update_prices_and_stock():
                             
                             progress_queues[session_id].put({
                                 'type': 'status_update',
-                                'message': f'  → Обновление товара с SEO контентом в WordPress...'
+                                'message': f'  → Обновление товара с SEO контентом + изображения в WordPress...'
                             })
                             
-                            # Обновляем товар с SEO контентом
-                            success = woocommerce_client.update_product_with_seo(wc_product_id, product, settings)
+                            # Обновляем товар с SEO контентом + изображениями
+                            success = woocommerce_client.update_product_with_seo(wc_product_id, product, settings, update_images=True)
                             
                             if success:
                                 progress_queues[session_id].put({

@@ -408,7 +408,7 @@ def update_product_price(
             
             self.update_state(
                 state='PROGRESS',
-                meta={'current': 80, 'total': 100, 'status': 'Обновление контента...'}
+                meta={'current': 80, 'total': 100, 'status': 'Обновление контента + изображения...'}
             )
             
             # Создаем настройки
@@ -418,8 +418,8 @@ def update_product_price(
                 markup_rubles=settings.get('markup_rubles', 5000)
             )
             
-            # Обновляем товар с SEO
-            success = woocommerce.update_product_with_seo(wc_product_id, product, sync_settings)
+            # Обновляем товар с SEO + изображениями
+            success = woocommerce.update_product_with_seo(wc_product_id, product, sync_settings, update_images=True)
             
             if success:
                 return {
