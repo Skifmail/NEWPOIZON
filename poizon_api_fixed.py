@@ -29,6 +29,7 @@ import time
 import openai
 import re
 from openai_service import OpenAIService  # Import OpenAIService
+from redis_rate_limiter import get_rate_limiter  # Import Rate Limiter
 
 # Отключаем SSL предупреждения для работы с API
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -70,6 +71,17 @@ class PoisonAPIClientFixed:
         # Инициализация сервиса OpenAI
         self.openai_service = OpenAIService()
         
+        # Инициализация глобального rate limiter
+        # Лимит Poizon API: 0.5 запроса/сек = 1 запрос каждые 2 секунды
+        # КООРДИНАЦИЯ ВСЕХ ЗАДАЧ: неважно кто создал (пользователь 1, 2, 3...)
+        # Все Celery воркеры используют ОБЩИЙ счетчик в Redis
+        redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+        self.rate_limiter = get_rate_limiter(
+            max_requests=1,  # 1 запрос
+            window_seconds=2.0,  # за 2 секунды = 0.5 req/sec
+            redis_url=redis_url
+        )
+        
         if not self.api_key or not self.client_id:
             raise ValueError("POIZON_API_KEY и POIZON_CLIENT_ID должны быть в .env")
         
@@ -82,16 +94,23 @@ class PoisonAPIClientFixed:
         # Настройки retry
         self.max_retries = 3
         self.base_delay = 2  # базовая задержка в секундах
-        self.request_delay = 0.1  # задержка между запросами (0.1с = 10 запросов/сек)
         
         logger.info("🔌 [Poizon API] Клиент инициализирован")
         logger.info(f"⏱️  [Poizon API] Retry настройки: {self.max_retries} попыток, базовая задержка {self.base_delay}с")
-        logger.info(f"🛡️  [Poizon API] Защита от rate limit: {self.request_delay}с между запросами")
+        logger.info(f"🛡️  [Poizon API] Глобальный Rate Limiter: 0.5 req/sec (координация ВСЕХ задач через Redis)")
     
     def _make_request_with_retry(self, method: str, url: str, **kwargs) -> Optional[requests.Response]:
         """Выполняет запрос с retry механизмом при ошибках 429/503"""
-        # ВСЕГДА делаем задержку перед запросом (защита от rate limit)
-        time.sleep(self.request_delay)
+        # ГЛОБАЛЬНЫЙ rate limiting через Redis - координирует ВСЕ Celery воркеры
+        acquired = self.rate_limiter.acquire("poizon_api", blocking=True, timeout=30)
+        if not acquired:
+            logger.warning("⚠️  [Rate Limiter] Превышен timeout ожидания слота (30с)")
+            return None
+        
+        # Логируем статистику использования rate limiter (только для DEBUG уровня)
+        if logger.isEnabledFor(logging.DEBUG):
+            stats = self.rate_limiter.get_stats("poizon_api")
+            logger.debug(f"📊 [Rate Limiter] Загрузка: {stats['current_count']}/{stats['current_count'] + stats['available']} ({stats['utilization_percent']:.1f}%)")
         
         for attempt in range(self.max_retries):
             try:
