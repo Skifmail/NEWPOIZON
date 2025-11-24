@@ -110,7 +110,7 @@ class PoisonAPIClientFixed:
         # Логируем статистику использования rate limiter (только для DEBUG уровня)
         if logger.isEnabledFor(logging.DEBUG):
             stats = self.rate_limiter.get_stats("poizon_api")
-            logger.debug(f"📊 [Rate Limiter] Загрузка: {stats['current_count']}/{stats['current_count'] + stats['available']} ({stats['utilization_percent']:.1f}%)")
+            logger.debug(f"📊 [Rate Limiter] Загрузка: {stats['current_count']}/{stats['current_count'] + stats['available']} ({stats.get('utilization', 0):.1f}%)")
         
         for attempt in range(self.max_retries):
             try:

@@ -1025,6 +1025,7 @@ def manual_search():
                 'error': 'Не указан запрос'
             }), 400
         
+        print(f"DEBUG: STARTING SEARCH for query: {query}", flush=True)
         logger.info(f"Ручной поиск: '{query}'")
         
         # Поиск по SPU ID (если число)
@@ -1071,9 +1072,22 @@ def manual_search():
         logger.info(f"Поиск по ключевому слову: '{query}'")
         # Убрано ограничение limit=50, теперь вернет максимум доступных результатов (обычно 100)
         try:
+            print("DEBUG: Calling poizon_client.search_products...", flush=True)
             products = poizon_breaker.call(
                 lambda: poizon_client.search_products(keyword=query)
             )
+            print(f"DEBUG: search_products returned type: {type(products)}", flush=True)
+            logger.info(f"DEBUG: search_products returned {len(products) if products else 0} items. Type: {type(products)}")
+            
+            if isinstance(products, list):
+                print(f"DEBUG: products list length: {len(products)}", flush=True)
+                if len(products) > 0:
+                    print(f"DEBUG: First product: {products[0]}", flush=True)
+                    logger.info(f"DEBUG: First item: {products[0]}")
+            else:
+                print(f"DEBUG: products is not a list: {products}", flush=True)
+                logger.warning(f"Products is not a list: {products}")
+
         except CircuitBreakerError:
             logger.warning("[Circuit Breaker] Poizon API временно недоступен")
             return jsonify({
@@ -1081,6 +1095,7 @@ def manual_search():
                 'error': 'Poizon API временно недоступен. Попробуйте позже.'
             }), 503
         except Exception as e:
+            print(f"DEBUG: EXCEPTION: {e}", flush=True)
             logger.error(f"[ERROR] Ошибка поиска: {e}")
             return jsonify({
                 'success': False,
@@ -1088,18 +1103,19 @@ def manual_search():
             }), 500
         
         formatted_products = []
-        for product in products:
-            spu_id = product.get('spuId', product.get('productId'))
-            formatted_products.append({
-                'spuId': spu_id,
-                'sku': str(spu_id),
-                'title': product.get('title', ''),
-                'brand': product.get('brandName', product.get('brand', '')),
-                'description': product.get('title', '')[:200],
-                'images': product.get('images', [product.get('logoUrl')]) if product.get('images') else [product.get('logoUrl', '')],
-                'articleNumber': product.get('articleNumber', ''),
-                'price': product.get('price', 0)
-            })
+        if products:
+            for product in products:
+                spu_id = product.get('spuId', product.get('productId'))
+                formatted_products.append({
+                    'spuId': spu_id,
+                    'sku': str(spu_id),
+                    'title': product.get('title', ''),
+                    'brand': product.get('brandName', product.get('brand', '')),
+                    'description': product.get('title', '')[:200],
+                    'images': product.get('images', [product.get('logoUrl')]) if product.get('images') else [product.get('logoUrl', '')],
+                    'articleNumber': product.get('articleNumber', ''),
+                    'price': product.get('price', 0)
+                })
         
         logger.info(f"Найдено товаров: {len(formatted_products)}")
         
@@ -1994,6 +2010,7 @@ def update_prices_and_stock():
                             
                             if not search_results or len(search_results) == 0:
                                 progress_queues[session_id].put({
+
                                     'type': 'product_done',
                                     'current': idx,
                                     'status': 'error',
