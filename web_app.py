@@ -360,17 +360,17 @@ CATEGORY_KEYWORDS = {
     # ЖЕНСКАЯ ОДЕЖДА (1000095)
     1000095: {
         'keywords': ['女装', '女士', '女款', 'T恤', '卫衣', '外套', '裤子', '短裤', '裙', '连衣裙',
-                    'women clothing', 'dress', 'blouse', 'skirt', 'top', 't-shirt', 'jacket', 
+                    'dress', 'blouse', 'skirt', 'top', 't-shirt', 'jacket', 
                     'pants', 'jeans', 'women', 'coat', 'sweater'],
-        'search_terms': ['women clothing', 'dress', 'blouse', 'skirt', 'women jacket', 'women pants', 'women jeans']
+        'search_terms': ['dress', 'blouse', 'skirt', 'jacket', 'sweater', 'coat', 'jeans']
     },
     
     # МУЖСКАЯ ОДЕЖДА (1000096)
     1000096: {
         'keywords': ['男装', '男士', '男款', 'T恤', '卫衣', '外套', '裤子', '短裤',
-                    'men clothing', 'shirt', 't-shirt', 'jacket', 'pants', 'jeans', 
+                    'shirt', 't-shirt', 'jacket', 'pants', 'jeans', 
                     'sweater', 'hoodie', 'men', 'coat'],
-        'search_terms': ['men clothing', 'shirt', 'men jacket', 'men pants', 'jeans', 'sweater', 'hoodie']
+        'search_terms': ['shirt', 'jacket', 'pants', 'jeans', 'sweater', 'hoodie', 'coat']
     },
     
     # АКСЕССУАРЫ (92)
